@@ -1,0 +1,11 @@
+[project]
+name = "resource-simulator-worker"
+version = "0.1.0"
+description = "Local durable resource simulation worker"
+requires-python = "==3.13.16"
+dependencies = []
+
+[tool.uv]
+package = false
+cache-dir = ".cache/uv"
+python-downloads = "never"

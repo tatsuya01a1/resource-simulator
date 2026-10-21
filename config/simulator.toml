@@ -1,0 +1,8 @@
+# Model defaults are defined in basic design section 4.
+[model]
+initial_resource = 100.0
+initial_parameter = 0.0
+parameter_min = -1.0
+parameter_max = 1.0
+coefficient = 10.0
+interval_seconds = 1.0

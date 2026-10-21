@@ -1,13 +1,17 @@
 # リソース管理シミュレータ 基本設計書
 
-- 文書バージョン：0.2
-- 作成日：2026-10-11
+- 文書バージョン：0.3
+- 作成日：2026-10-11／更新日：2026-10-22
 - 対象：PC Worker + Azure公開／保存構成のMVP
-- 上位文書：[要件定義書 0.3](resource-simulator-requirements.md)
+- 上位文書：[要件定義書 0.4](resource-simulator-requirements.md)（0.3の機能要件・ACを維持し環境条件のみ追記）
 - 位置付け：要件を実現する配置、技術構成、処理、データ、API、運用の初期設計。
 - 状態：Azure採用とユーザー提示条件は確定。サービスの個別構成・数値モデル等は設計上の初期案。デプロイ／実機検証は未実施。
 
+段階1のローカルWorkerは実装済み。Windows上での検証結果と未検証範囲は[段階1検証記録](stage1-validation.md)を参照する。Azureの実機検証は未実施。
+
 改訂履歴：0.2（2026-10-11）で初回取得と自動反映を明記し、最新値のポーリング初期案を2秒から1秒へ変更した。
+
+0.3（2026-10-22）：ユーザー指示によりWorkerのPython 3.10前提を撤回し、3.13系の最新パッチ候補を確認して3.13.16へ固定。外部依存なしで設定を読み込むためYAML初期案をTOMLへ変更し、段階1の保存・ロック・復元・実装配置を具体化した。計算式・計算例・API契約・AC-01〜20は変更しない。クラウドAPIのランタイムは引き続き別途検証する。
 
 ## 1. 設計思想と決定理由
 
@@ -76,9 +80,9 @@ flowchart TD
 
 | 層 | 初期選定 | 補足 |
 | --- | --- | --- |
-| PC環境 | Windows 11、VSCode、uv | 既存環境を活用する |
-| Worker | Python、標準sqlite3、Azure SDK | PCは既存Python 3.10での互換性を検証する。依存バージョンは実装時に固定 |
-| 設定 | YAML | Pydantic等による検証は実装時に選ぶ。秘密情報は設定ファイルに混在させない |
+| PC環境 | Windows 11、PowerShell、VSCode、uv | 既存のシステムPython・PATH・レジストリ・他プロジェクトを変更しない |
+| Worker | CPython 3.13.16、標準sqlite3 | 3.13系の最新パッチ候補を公式一覧・uvで確認し、段階1の互換性をWindows上で検証。Python本体は`.tools/python`、環境は`.venv`。Azure SDKは段階2で別途検証・固定 |
+| 設定 | TOML、標準tomllib、dataclassによる検証 | 段階1は外部実行・開発依存なし。未知・欠落キー、型、有限性、範囲を検証。秘密情報を設定ファイルに混在させない |
 | プロセス管理 | Windowsタスクスケジューラ | 起動時実行・失敗時再起動・二重起動抑止 |
 | コンテナ | MVPでは利用しない | 1台のPC・1 Workerでは追加の管理層を抑える。Docker禁止の意味ではない |
 | Web | React + TypeScript + Vite | 閲覧専用、ローソク足対応の軽量グラフを利用。ライブラリは実装時に選定 |
@@ -89,7 +93,9 @@ flowchart TD
 | 履歴形式 | JSON + gzip | 日次・リソース単位。圧縮は初回ファイル作成時から実施 |
 | 基盤定義 | Bicep、バージョン管理 | 課金する常駐VMやApp Serviceプランは置かない |
 
-SWAの対応表ではPython 3.11がManaged Functionsに掲載されている。Functions全般ではPython 3.10のサポート終了予定が2026年10月のため、以前の「PC/APIとも3.10」の案をクラウド新規APIには採用しない。2026-10-11に公式資料を確認した。実装開始時にも最新の対応表を確認する（参考資料S-01、S-02）。
+WorkerとクラウドAPIのランタイムは独立して選定する。2026-10-11に確認したSWA対応表ではPython 3.11がManaged Functionsに掲載されていたため、クラウドAPIは3.11を初期候補としている。今回のWorker変更をAPIへ適用しない。API実装時に最新の対応表・サポート期限・SDK互換性を再確認する（参考資料S-01、S-02）。
+
+2026-10-21〜22のWorker環境確認では、Python公式一覧の3.13系最新パッチ版とuv 0.13.4の配布候補は3.13.16だった。`.python-version`と`requires-python ==3.13.16`、依存解決の`uv.lock`で固定する。段階1は標準ライブラリの`tomllib`・`sqlite3`・`msvcrt`・`unittest`等を使い、外部ライブラリは追加しない。設定をTOMLに変更する理由は、Python 3.13標準機能で安全な設定読込と検証を行えるためである。Python本体の配布はuvのpython-build-standalone（20261013ビルド）を使用する。
 
 Managed FunctionsはHTTPのみで、Managed IdentityとKey Vault参照を利用できない（S-03）。本設計ではTimer Trigger、Blob Trigger、Managed Identityを前提にしない。Python APIの依存はrequirements.txtとしてデプロイし、uvをクラウドの起動要件にしない。
 
@@ -138,6 +144,10 @@ simulation_elapsed_seconds = step × 1
 
 起動時に通常実行を開始し、ブラウザの開始操作を要求しない。保存状態のRを設定ファイルの初期値で上書きしない。新しい初期値／規則で開始するときは明示したローカル初期化コマンドを使い、別のrun_idを発行する。初期値項目は復旧時に適用せず、保存状態を優先する。設定全体のハッシュとは別に、初期値を除く計算規則のハッシュを持つ。計算規則が既存の実行と異なる場合は、暗黙に新規則を適用せず、保存した規則での復旧か新規実行かをローカル操作で解決する。
 
+段階1では設定検証をDB変更前に行い、DBの絶対パスに対応する永続ロックファイルをWindowsの`msvcrt.locking`で非待機ロックする。同じDBを使う`run`・`new-run`は同じロックを取得する。強制終了時はOSが解放し、ロックファイルは削除しない。DBはネットワーク共有・同期フォルダーでなくローカルディスクへ置く。設定ファイルを分けても同じシミュレーションは同じDBパスで起動する。
+
+通常実行は`python -m resource_simulator run`、保存済み規則を明示的に選ぶ場合は`--use-saved-rules`、新しい実行は`new-run`コマンドとする。`new-run`は旧実行の分内集計を確定し未送信記録とともに保持した上で、新しい実行のstep=0を保存する。通常停止では分内状態を未確定のまま残す。
+
 ### 5.2 1ステップの保存
 
 計算スレッドは時計の待機にmonotonic clockを使用し、記録用にはUTCのwall clockを使用する。負荷やスリープで遅れた場合は高速な追いつき計算をしない。実行された1ステップだけ進め、次の期限を調整する。
@@ -164,6 +174,7 @@ PC停止中の実時間は経過ステップに加算しない。再起動から
 | 論理テーブル | 主な情報 | 役割 |
 | --- | --- | --- |
 | simulation_runs | simulator_id、run_id、設定、設定ハッシュ、計算規則ハッシュ、開始日時、schema_version | 実行と規則の識別 |
+| active_run | 単一の現在run_id | 再開する実行の参照 |
 | checkpoints | run_id、step、R、P、増減量、計算日時、必要な乱数状態 | 最新の復元元 |
 | open_candles | run_id、resource_id、minute_start、O/H/L/C、sample_count | 分の途中の復元 |
 | candles | run_id、resource_id、minute_start、O/H/L/C、観測範囲 | 確定した分足 |
@@ -171,6 +182,10 @@ PC停止中の実時間は経過ステップに加算しない。再起動から
 | daily_files | 日付、resource_id、hash、クラウド保存先、完了状態 | 日次化・退避・再試行の追跡 |
 
 1秒値の全履歴をSQLiteに無期限蓄積しない。最新checkpointとOHLCを保存する。ローカルOHLCはクラウドへの保存確認後も最低3か月保持する初期案とし、それ以前は退避確認後に削除できる。未送信データは期間だけを理由に削除しない。DBスキーマや具体的なSQLは実装時に確定する。
+
+段階1の実スキーマは`resource_simulator/persistence.py`で定義する。スキーマ版は`PRAGMA user_version=1`、simulatorはDBごとに1個、resource_idは`resource`固定である。設定・checkpoint・OHLCは有限値を検証したJSONで保存し、識別キーと参照はSQLiteの主キー・外部キーで管理する。未対応スキーマや既存の別DBを自動初期化しない。起動時に整合性・外部キー・設定ハッシュ・checkpointとOHLCのサンプル総数・最終値を検証する。
+
+確定OHLCとoutboxのキーは`(run_id, resource_id, minute_start)`。段階1でも確定足と未送信記録を同一トランザクションで作り、再開時の整合性を保つ。送信・送信済み管理・日次化・削除は段階2以降で実装し、この段階では保存した履歴もoutboxも削除しない。日次管理テーブルはまだ作成しない。
 
 ## 6. OHLC・日次履歴・期間管理
 
@@ -375,34 +390,30 @@ CloudはOHLCの独立保管先になるが、それだけでPCの全状態をバ
 | 3 | Read API、Web、期間選択、更新停滞、端末対応 | AC-05〜06、11、13、17、19〜20 |
 | 4 | Azure公開・運用設定、障害試験、料金計測 | 全条件の統合確認 |
 
-実装時の最小ディレクトリ案：
+段階1の実装配置（Web・API・infraは未作成）：
 
 ```text
-simulator/
-  worker/
-    src/engine/
-    src/persistence/
-    src/aggregation/
-    src/cloud/
-    config/simulator.yaml
-    pyproject.toml
-  web/
-    src/
-    staticwebapp.config.json
-    package.json
-  api/
-    function_app.py
-    host.json
-    requirements.txt
-  infra/
-    main.bicep
+resource-simulator/
+  resource_simulator/
+    config.py
+    engine.py
+    aggregation.py
+    persistence.py
+    locking.py
+    worker.py
+    __main__.py
+  config/simulator.toml
+  tests/
+  .python-version
+  pyproject.toml
+  uv.lock
   docs/
     resource-simulator-requirements.md
     resource-simulator-basic-design.md
   README.md
 ```
 
-ローカルDB、秘密鍵、`.env`、実行ログはリポジトリへ入れない。具体的なエントリーポイントとパッケージ版は実装時に決める。
+ローカルDB、秘密鍵、`.env`、実行ログはGitへ入れない。既定の実データ保存先は`%LOCALAPPDATA%/resource-simulator`。段階1の実行・状態確認・新規実行・検証コマンドはREADMEを参照する。
 
 固定乱数による計算、OHLC集約、強制終了後の復元、通信断後の再送、条件更新競合、月末の3か月境界、日付変更中の停止、退避失敗と照合を重点検証する。約100リソースの検証用データでpayloadサイズ・日次化・API取得量を測るが、本番モデルを100個へ拡大することとは分ける。
 
@@ -413,7 +424,7 @@ simulator/
 | 数値モデルと期間 | 要件定義Q-01・Q-02の初期案で進める |
 | 閲覧の制限 | 匿名閲覧。招待者だけに制限する要件が加わる場合に再設計 |
 | Storage／SWAの地域とSKU | 実装時の利用可能地域と現行料金で確定 |
-| PCのPython版 | 3.10の互換性を検証。クラウドAPIは3.11を初期候補 |
+| PCのPython版 | ユーザー指示により3.13系の最新パッチ候補を検証し、段階1は3.13.16へ固定。今後の更新時も互換性を確認して固定ファイルを更新。クラウドAPIは独立して選定し、3.11は未検証の初期候補 |
 | Cloud資格情報 | タスクでの証明書認証とAPIのRead SASを小さな接続試験で確認 |
 | 長期退避のアクセス層 | Hotで退避開始。Archive層はサイズ・移行費・復元要否を測って決定 |
 | 長期保存年数 | 未指定。自動削除しない |
@@ -426,6 +437,8 @@ simulator/
 
 確認日：2026-10-11。サービスの制約・サポート・料金は実装／公開直前に再確認する。
 
+Worker用の追加資料S-07〜11は2026-10-21〜22に確認した。Azure関連のS-01〜06を今回実機検証したものではない。
+
 | ID | 資料 | 確認した点 |
 | --- | --- | --- |
 | S-01 | [SWA対応言語・ランタイム](https://learn.microsoft.com/en-us/azure/static-web-apps/languages-runtimes) | Managed FunctionsのPython 3.11掲載 |
@@ -434,3 +447,8 @@ simulator/
 | S-04 | [Tableサービスのデータモデル](https://learn.microsoft.com/en-us/rest/api/storageservices/Understanding-the-Table-Service-Data-Model) | Entity全体1MiB、文字列プロパティ64KiB |
 | S-05 | [Blobのアーカイブ](https://learn.microsoft.com/en-us/azure/storage/blobs/archive-blob) | 即時読出し不可、復元と最低保存期間／早期削除料金 |
 | S-06 | [Cost Management予算](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-acm-create-budgets) | 予算超過時にリソース消費を自動停止しない |
+| S-07 | [Pythonリリース一覧](https://www.python.org/downloads/)、[3.13.16](https://www.python.org/downloads/release/python-31316/) | 確認時点の3.13系最新パッチ候補3.13.16（2026-09-30） |
+| S-08 | [uvのPython版管理](https://docs.astral.sh/uv/concepts/python-versions/)、[uv Python CLI](https://docs.astral.sh/uv/reference/cli/#uv-python-install) | プロジェクト版の固定、配布元、`--install-dir`・`--no-bin`・`--no-registry` |
+| S-09 | [tomllib](https://docs.python.org/3.13/library/tomllib.html) | 標準ライブラリでTOMLを読み込める |
+| S-10 | [sqlite3](https://docs.python.org/3.13/library/sqlite3.html) | 明示トランザクション・接続・Backup API |
+| S-11 | [msvcrt](https://docs.python.org/3.13/library/msvcrt.html) | Windowsでの非待機ファイル領域ロック |
