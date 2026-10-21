@@ -19,7 +19,7 @@
 ## Codexへの入口
 
 1. [AGENTS.md](AGENTS.md)を読む。
-2. [ドキュメント案内](docs/README.md)から[要件定義書0.4](docs/resource-simulator-requirements.md)と[基本設計書0.3](docs/resource-simulator-basic-design.md)を読む。要件0.3の機能・ACは維持し、0.4ではユーザー指定のWorker環境だけを追記した。
+2. [ドキュメント案内](docs/README.md)から[要件定義書0.4](docs/resource-simulator-requirements.md)と[基本設計書0.4](docs/resource-simulator-basic-design.md)を読む。要件0.3の機能・ACは維持し、要件0.4ではユーザー指定のWorker環境だけを追記した。
 3. 基本設計書第13章の段階に沿って実装し、要件定義書第8章の受入条件で検証する。
 
 要件定義書を優先し、初期案と確定要件を区別する。数値モデル・API等の詳細は各文書を正本とし、このREADMEに複製しない。
@@ -29,6 +29,10 @@
 2026-10-22：基本設計第13章の段階1を実装。計算Engine、TOML設定検証、SQLiteへの原子的保存、単一起動、保存済み状態からの再開、1分OHLCと分内状態の復元をWindowsで検証済み。確定足と未送信記録も同じトランザクションで保持する。Azureへの送信はまだ行わない。
 
 段階1はローカルWorkerの完成範囲であり、MVP全体の完成ではない。Azureリソース作成・同期・Web・API・公開・料金実測は未実施。
+
+`cf351ea`を基準とするレビュー修正では、通常の予定期限を1秒ずつ進めるよう計算周期を修正した。保存が0.2秒でも通常の開始は1・2・3秒となり、保存時間が毎周期に加算されない。次期限に間に合わない場合は、保存完了から1秒後へ期限を立て直して高速な追いつき計算を防ぐ。Windows・固定Pythonで既存29件＋追加3件の計32テストが成功している。
+
+段階2の配送台帳・退避後の再開・版1→2移行方法は[保存・移行設計0.1](docs/resource-simulator-storage-design.md)に具体化した。**保存設計だけを追加した段階で、現在のコードとDBスキーマは版1のまま**。移行・送信・削除はまだ実装しておらず、既存DBのoutboxやOHLCを手動で削除してはいけない。今後はackedのoutbox削除、確認済み退避後の本体削除、欠落検出を同時に成立させる版2を実装・検証する。
 
 ## セットアップ（Windows 11・PowerShell）
 
@@ -122,5 +126,13 @@ git diff --check
 ```
 
 テストは`.cache/tests`内に一時DBを作り、終了時に削除する。既定の運用DBは使用しない。子プロセスを強制終了する試験も含む。固定入力での計算、下限制約、実トランザクション中の強制終了・復元、設定変更、保存失敗、分・日本時間の日付境界、二重起動を検証する。
+
+周期の固定時計テストだけを実行する場合：
+
+```powershell
+uv run --locked python -m unittest tests.test_stage1.PersistenceTests.test_worker_storage_time_does_not_shift_normal_deadlines tests.test_stage1.PersistenceTests.test_worker_rebases_when_storage_reaches_or_exceeds_next_deadline tests.test_stage1.PersistenceTests.test_worker_sleep_with_storage_delay_does_not_catch_up tests.test_stage1.PersistenceTests.test_worker_waits_first_second_and_does_not_catch_up -v
+```
+
+0.2秒の保存遅延、1秒ちょうど／1.2秒の期限超過、3600秒のスリープを実SQLite保存と固定時計で検証する。実機で1時間待った試験ではなく、スケジューラの挙動を再現する試験である。
 
 AC-IDごとの結果と未検証事項は[段階1検証記録](docs/stage1-validation.md)を参照。AC-16は単一起動とローカルの古い状態の上書き防止のみを検証し、クラウドの遅延応答は段階2以降で扱う。

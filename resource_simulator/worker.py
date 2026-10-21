@@ -22,7 +22,12 @@ def run(store: Store, session: Session, stop: Event, *, steps: int | None = None
         state = advance(session.state, session.config, sample(), now())
         session = store.commit_step(session, state)
         count += 1
-        # Leave a full interval after an overdue step, including after sleep/resume.
-        deadline = max(deadline + 1.0, monotonic() + 1.0)
+        # Keep the planned cadence while work fits in the interval. If the next
+        # deadline was missed (also after sleep), discard missed slots and wait
+        # a full interval instead of executing catch-up steps.
+        deadline += 1.0
+        finished_at = monotonic()
+        if finished_at >= deadline:
+            deadline = finished_at + 1.0
     logging.info("Worker stopped run=%s step=%s", session.run_id, session.state.step)
     return session

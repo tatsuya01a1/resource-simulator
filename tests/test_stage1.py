@@ -9,6 +9,7 @@ import sys
 import tempfile
 from threading import Event, Thread
 import unittest
+from unittest.mock import patch
 
 from resource_simulator.config import ModelConfig, ValidationError, load_config
 from resource_simulator.engine import advance, initial
@@ -293,6 +294,60 @@ class PersistenceTests(WorkspaceTest):
                          monotonic=lambda: clock[0], wait=wait)
             self.assertEqual(result.state.step, 2)
             self.assertEqual(waits, [1.0, 1.0])
+
+    def timed_worker(self, *, storage_seconds, sleep_seconds=0, steps=3):
+        clock = [0.0]
+        waits = []
+        starts = []
+
+        def wait(delay):
+            self.assertGreater(delay, 0, "overdue work must not cause a catch-up loop")
+            waits.append(delay)
+            clock[0] += delay
+            if len(waits) == 1:
+                clock[0] += sleep_seconds
+            return False
+
+        with Store(self.database) as store:
+            session = store.resume(ModelConfig(), AT)
+            commit = store.commit_step
+
+            def slow_commit(session, state):
+                starts.append(clock[0])
+                result = commit(session, state)
+                clock[0] += storage_seconds
+                return result
+
+            with patch.object(store, "commit_step", side_effect=slow_commit):
+                result = run(store, session, Event(), steps=steps, sample=lambda: 0.5,
+                             now=lambda: AT + timedelta(seconds=clock[0]),
+                             monotonic=lambda: clock[0], wait=wait)
+            self.assertEqual(result.state.step, steps)
+            self.assertEqual(status(self.database)["state"]["step"], steps)
+        return starts, waits
+
+    def test_worker_storage_time_does_not_shift_normal_deadlines(self):
+        starts, waits = self.timed_worker(storage_seconds=0.2)
+        for actual, expected in zip(starts, (1.0, 2.0, 3.0), strict=True):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(waits, (1.0, 0.8, 0.8), strict=True):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_worker_rebases_when_storage_reaches_or_exceeds_next_deadline(self):
+        # Finish exactly at the next deadline, then exceed it: both must wait.
+        for duration in (1.0, 1.2):
+            with self.subTest(storage_seconds=duration):
+                self.database = Path(self.directory.name) / f"overrun-{duration}.sqlite3"
+                starts, waits = self.timed_worker(storage_seconds=duration)
+                for actual, expected in zip(starts, (1.0, 2.0 + duration, 3.0 + 2 * duration), strict=True):
+                    self.assertAlmostEqual(actual, expected)
+                self.assertEqual(waits, [1.0, 1.0, 1.0])
+
+    def test_worker_sleep_with_storage_delay_does_not_catch_up(self):
+        starts, waits = self.timed_worker(storage_seconds=0.2, sleep_seconds=3600, steps=2)
+        self.assertAlmostEqual(starts[0], 3601.0)
+        self.assertAlmostEqual(starts[1], 3602.2)
+        self.assertEqual(waits, [1.0, 1.0])
 
     def test_normal_stop_does_not_generate_another_step(self):
         stop = Event()
