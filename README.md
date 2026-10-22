@@ -26,7 +26,7 @@
 
 ## 現在の状態
 
-最新値公開の実装：PC Workerから非公開Azure Tableへコミット済みの最新値を同期し、Read APIとReact Webで初回取得・約1秒更新・停滞表示を行う。実機検証の結果・公開URL・デプロイコミットは[最新値公開検証記録](docs/latest-values-validation.md)、構築・料金・認証は[Azure構築・運用](docs/azure-latest-values.md)を参照。過去の段階1記録は以下に保持する。OHLCクラウド同期・日次化・退避・履歴グラフは後続。
+最新値公開の実装・Azure実機確認済み。公開URLは **https://polite-plant-0eb01a400.3.azurestaticapps.net** 。デプロイ元は`codex/stage1-local-worker`、デプロイSHAは`cc721d2b4b5573c92545dd1644d3feda1fad7328`。PC Workerから非公開Azure Tableへコミット済み最新値を同期し、APIとReact Webで初回取得・約1秒更新・停滞表示を行う。結果は[最新値公開検証記録](docs/latest-values-validation.md)、構築・料金・認証は[Azure構築・運用](docs/azure-latest-values.md)。OHLCクラウド同期・日次化・退避・履歴グラフは後続。
 
 ### 最新値同期を使うWorkerの起動・停止
 
@@ -49,7 +49,9 @@ uv run --locked python -m resource_simulator run --db .secrets/worker.sqlite3 --
 
 同期を付けてもDB版は1のまま。通信失敗時も計算・保存を継続し、回復後は最新checkpointだけを送る。OHLCとoutboxは保持し、手動削除しない。現在の公開Webは閲覧専用で、履歴グラフは未実装。
 
-2026-10-22：基本設計第13章の段階1を実装。計算Engine、TOML設定検証、SQLiteへの原子的保存、単一起動、保存済み状態からの再開、1分OHLCと分内状態の復元をWindowsで検証済み。確定足と未送信記録も同じトランザクションで保持する。Azureへの送信はまだ行わない。
+### 段階1時点の記録（以下は過去の状態）
+
+2026-10-22：基本設計第13章の段階1を実装。計算Engine、TOML設定検証、SQLiteへの原子的保存、単一起動、保存済み状態からの再開、1分OHLCと分内状態の復元をWindowsで検証済み。確定足と未送信記録も同じトランザクションで保持する。段階1時点ではAzureへの送信は行わない。
 
 段階1はローカルWorkerの完成範囲であり、MVP全体の完成ではない。Azureリソース作成・同期・Web・API・公開・料金実測は未実施。
 
@@ -74,7 +76,7 @@ uv run --locked python --version
 
 Python本体は`.tools/python`、専用仮想環境は`.venv`、uvキャッシュは`.cache/uv`へ置く。PATH・レジストリ・システム既定のPython・uvのグローバル設定は変更しない。`.python-version`と`pyproject.toml`でPythonのパッチ版を固定し、依存解決結果を`uv.lock`へ記録している。自動のPythonダウンロードは無効化してあり、上記の明示的な導入だけを行う。仮想環境をactivateする必要はない。
 
-段階1の実行・テストはPython標準ライブラリのみで、外部依存は0件。`tomllib`・`sqlite3`・Windowsの`msvcrt`等の互換性は実際のテストで確認した。将来のAzure SDKとクラウドAPIのランタイムはそれぞれの実装段階で検証・固定する。
+計算・保存・OHLCはPython標準ライブラリを使い、`tomllib`・`sqlite3`・Windowsの`msvcrt`等の互換性を確認済み。現在は最新値同期のAzure SDKも追加し、uv.lockで固定している。クラウドAPIのPython 3.11と依存は別に検証・固定する。
 
 VSCodeではこのフォルダーを開き、Pythonインタープリターとして`.venv\Scripts\python.exe`を選択する。現在のPCの`code`コマンドはCursorを指すため、VSCodeのアプリから開くか、次を使う。
 

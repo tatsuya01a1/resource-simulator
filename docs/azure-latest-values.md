@@ -1,6 +1,8 @@
 # 最新値公開の構築・運用
 
-版：0.1／2026-10-22。基準：51ba06ce415374ca71e8b040e64cf3310a3a7d00。
+版：0.2／2026-10-22。基準：51ba06ce415374ca71e8b040e64cf3310a3a7d00。
+
+改訂：0.1で構築方式・認証・費用を具体化。0.2で実機検証済みのデプロイ、再現手順、運用上の残作業を記録した。
 
 ## 今回の範囲
 
@@ -45,3 +47,32 @@ SWA Freeのサイト固定費は0円。APIを別の有料常駐プランにし�
 多数端末の24時間閲覧、応答時間・メモリ増、履歴の大量読取、ログ収集を加えれば増える。月3,000円は説明を伴う許容額であり通常目標ではない。月1,500円の予算通知と日次実績を監視し、通知を強制課金停止と扱わない。SWAの100GB帯域枠はsubscription全体の共有枠であり、超過時のFree制限にも注意する。
 
 既存のsubscription予算`1500yen`（Monthly、1,500円）と75%超過通知の有効状態を読み取り確認した。既存設定は変更していない。
+
+## 再現可能な構築・デプロイ手順
+
+リポジトリルートのPowerShellから実施。Azure CLIを導入し、開発者として`az login`（必要なら`--tenant <tenant-id> --use-device-code`でMFA）後、`az account show`・`az group list`・`az resource list`・自身のロール割当を読み取り確認する。OwnerまたはRG構築・Storage・SWAとTableロール割当に必要な権限、Entraアプリ登録権限が必要。別PJのRGを指定してはいけない。初期設定スクリプトは既存RGのprojectタグが異なれば拒否する。
+
+```powershell
+uv sync --locked
+uv run --locked python scripts/azure_setup.py --subscription <subscription-id> --storage <global-unique-storage-name>
+npm.cmd --prefix web ci
+npm.cmd install --prefix .cache/deploy-tools @azure/static-web-apps-cli@2.1.0 --cache .cache/npm
+# 必ずcodex/stage1-local-workerへコミット・Pushし、originとの一致・クリーン状態を確認する
+uv run --locked python scripts/deploy.py
+uv run --locked python scripts/worker_control.py start
+```
+
+Azureの初期構築はBicepから再現し、デプロイは公式SWA CLIにローカルでビルドしたWebとLinux用APIパッケージを渡す。GitHub Actionsのmain自動デプロイを生成しない。`.secrets/deployment.json`に公開URL・ブランチ・デプロイSHAを残し、APIのBUILD_COMMITにも同じSHAを保存する。初期設定の再実行では既存ID・証明書を再利用する。SASを更新した場合はデプロイを再実行してBUILD_COMMITも再設定する。
+
+API用のWindows検証環境を別途作る場合：
+
+```powershell
+uv python install 3.11.17 --install-dir .tools/python --no-bin --no-registry
+uv venv api/.venv --python .tools/python/cpython-3.11.17-windows-x86_64-none/python.exe
+uv pip install --python api/.venv/Scripts/python.exe -r api/requirements.txt
+api/.venv/Scripts/python.exe -m unittest discover -s api/tests -v
+```
+
+Workerの停止は`uv run --locked python scripts/worker_control.py stop`。ログは`.secrets/worker.log`（1MB×現行＋過去3本）、起動時コンソールは`.secrets/worker-console.log`。同じDBでの二重起動はロックで防止する。証明書・SAS・デプロイトークンをコンソールや共有設定へ貼り付けない。`.secrets`とSQLite一式はGitへ入れず、バックアップはSQLite Backup APIで取得する。
+
+今回の最終公開URL：https://polite-plant-0eb01a400.3.azurestaticapps.net 。デプロイSHA：`cc721d2b4b5573c92545dd1644d3feda1fad7328`。作成したリソースは上記専用RG・Storage・SWAとWorkerのEntra ID／証明書・Table限定ロールだけで、別PJのリソースを変更していない。
