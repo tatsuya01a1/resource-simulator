@@ -1,13 +1,15 @@
 # リソース管理シミュレータ 基本設計書
 
-- 文書バージョン：0.5
+- 文書バージョン：0.6
 - 作成日：2026-10-11／更新日：2026-10-22
 - 対象：PC Worker + Azure公開／保存構成のMVP
-- 上位文書：[要件定義書 0.5](resource-simulator-requirements.md)（従来のMVP要件・ACを維持し最新値先行公開を追記）
+- 上位文書：[要件定義書 0.6](resource-simulator-requirements.md)（従来のMVP要件・ACを維持し最新値先行公開を追記）
 - 位置付け：要件を実現する配置、技術構成、処理、データ、API、運用の初期設計。
 - 状態：最新値の先行公開をAzureへデプロイし実機検証済み。今回の確定構成は[構築・運用記録](azure-latest-values.md)を参照。OHLCクラウド同期・日次化・圧縮退避・履歴表示は後続。
 
 段階1のローカルWorkerは実装済み。Windows上の回帰検証は[段階1検証記録](stage1-validation.md)、最新値のAzure実機検証と未検証範囲は[最新値公開の検証記録](latest-values-validation.md)を参照する。
+
+0.6（2026-10-22）：Alpha/Beta、境界欠測判定、版3明示移行、公開版2・旧版互換と2列/1列UIを追加。運用環境は変更しない。
 
 改訂履歴：0.2（2026-10-11）で初回取得と自動反映を明記し、最新値のポーリング初期案を2秒から1秒へ変更した。
 
@@ -39,7 +41,7 @@
 3. PCからAzureへ接続する。クラウドからPCへ接続する経路を作らない。
 4. ブラウザは共有シミュレーションを閲覧する。画面のライフサイクルを計算に結び付けない。
 5. 1秒計算、1秒の最新同期、1分OHLC、日次ファイルという粒度を分離する。
-6. 約100リソースを想定するが、MVPの本実装は1リソース・1パラメータに絞る。
+6. 約100リソースを想定するが、MVPの本実装はAlpha/Betaの2リソース・1パラメータに絞る。
 
 Azureは既存の知見と小規模な公開・保存構成を優先して採用する。AWSとの料金上の優劣を本書の根拠にしない。前回提示した「数十〜数百円」の金額は確定見積もりとして引き継がない。
 
@@ -111,14 +113,14 @@ Managed FunctionsはHTTPのみで、Managed IdentityとKey Vault参照を利用�
 
 | 項目 | 既定値／仕様 |
 | --- | --- |
-| リソースRの初期値 | 100 |
+| Alpha（旧R）の初期値 | 100 |
 | パラメータPの初期値 | 0 |
 | パラメータ更新 | 各ステップで独立な一様乱数、−1以上1未満 |
 | 比例係数k | 10 |
 | シミュレーション時間Δt | 1秒 |
 | リソース下限 | 0、上限なし |
 | 内部精度 | 浮動小数、表示用の丸めを計算に持ち込まない |
-| フィードバック | パラメータ→リソースの一方向のみ |
+| フィードバック | パラメータ→Alpha→Betaの一方向のみ |
 
 更新は次の順序とする。
 
@@ -137,6 +139,34 @@ simulation_elapsed_seconds = step × 1
 固定乱数u=0.25、0.9、0.0の場合、P=−0.5、0.8、−1.0、R=95、103、93となる。R=3でP=−0.8の場合、R=0、要求−8、実増減−3となり、次にP=0.5ならR=5となる。
 
 初期設定、入力、出力は有限値であることを検証する。初期R≥0、P_min<P_max、P初期値が生成範囲内、k≥0、周期1秒を検証する。NaN／Infinity等が出た場合は最後の正常保存状態を維持して計算を停止する。
+
+### 4.1 Alpha/Betaの計算・時間境界（0.6追加・現行仕様）
+
+既存`State.resource`と内部ID `resource` を表示名Alphaへ対応させる。第4章のAlphaの既存規則・保存済み値を変更しない。Betaの内部IDは`beta`。
+
+```text
+DeltaAlpha = Alpha_new - Alpha_old  # 下限適用後の実増減量
+Beta_requested = multiplier * DeltaAlpha
+Beta_new = max(0, Beta_old + Beta_requested)
+Beta_actual = Beta_new - Beta_old
+```
+
+Alpha現在量の5倍ではない。乱数はAlpha用の1回だけ。計算・要求増減・候補・実増減・倍率は有限値のみとし、overflowは保存前に停止する。
+
+| JST実時間 | 倍率 |
+| --- | --- |
+| 04:00以上18:00未満 | 5 |
+| 当日18:00以上翌04:00未満 | x = abs(当日18時Beta基準値 − 当日04時Beta基準値) |
+
+04時100・18時130ならx=30、Alpha実量−2の夜のBeta要求は−60。Alpha実量+2の昼は要求+10。夜のx=0は不動。xは比率に変換せず、日付が変わっても有効期間内は固定する。
+
+**採用初期案**：`[model].initial_beta=100.0`、Beta下限0。夜の有効な同日ペア不足時は5を使い「基準値未確定」。値はnullのまま保持し、0や架空値で補わない。従来6キー設定も読み、Betaだけ既定値を補う。初期値変更は既存状態をリセットしない。
+
+境界はAsia/Tokyo（このモデルではUTC+9、DSTなし）で生成しUTCへ変換する。直前観測 < 境界 <= 今回観測で検出する。**同一Worker内で直前状態が保存済み、観測間隔0〜2.5秒以内の場合だけ**、直前コミット済みBetaを境界値にする。2.5秒ちょうどは許容、2.500001秒は欠測。約1秒周期の通常ジッタを許容する初期案であり、2.5秒以内の短い停止を完全識別する保証はない。再起動後の最初のステップは間隔が短くても連続としない。新規runを作った同一Workerではコミット済み初期値も直前値として使える（OHLCサンプルには数えない）。境界ちょうどで初期化した場合は過去の境界値を取得しない。移行・再起動時は非連続なので旧checkpointから跨いだ境界を取得しない。
+
+18時では基準値記録→同日の04時値との絶対差を確定→そのステップの倍率に反映する。04時は当日の新しい基準日へ切替→古いペア/xを破棄→そのステップから5。午前0時では基準日を前日として同じ夜を維持する。失われた境界を補間・追いつき取得せず、異なる日の04/18を組み合わせない。
+
+Beta checkpointの`Schedule`はtarget_date（JST）、morning/evening_value、night_multiplier、night_start/valid_until（UTC）、mode、multiplier、acquisitionを含む。acquisitionは昼の未完了`pending`、夜の不足`missing`、ペア確定`acquired`。0は有効観測、nullは未取得で区別する。再開時は同じ計算日時の状態を復元し、次の実観測で時刻モードと期限を更新する。既取得境界は観測日時より過去であり再取得しない。全データは両リソースと同じトランザクションで保存する。
 
 ## 5. Workerの実行・保存・再開
 
@@ -191,15 +221,15 @@ PC停止中の実時間は経過ステップに加算しない。再起動から
 
 1秒値の全履歴をSQLiteに無期限蓄積しない。最新checkpointとOHLCを保存する。ローカルOHLCはクラウドへの保存確認後も最低3か月保持する初期案とし、それ以前は退避確認後に削除できる。未送信データは期間だけを理由に削除しない。DBスキーマや具体的なSQLは実装時に確定する。
 
-段階1の実スキーマは`resource_simulator/persistence.py`で定義する。スキーマ版は`PRAGMA user_version=1`、simulatorはDBごとに1個、resource_idは`resource`固定である。設定・checkpoint・OHLCは有限値を検証したJSONで保存し、識別キーと参照はSQLiteの主キー・外部キーで管理する。未対応スキーマや既存の別DBを自動初期化しない。起動時に整合性・外部キー・設定ハッシュ・checkpointとOHLCのサンプル総数・最終値を検証する。
+段階1の旧スキーマは版1。現行実装は`resource_simulator/persistence.py`の版3で、Alpha内部IDは`resource`、Betaは`beta`。旧行を置換せずBetaの追加テーブルを持つ。詳細と明示移行は保存・移行設計9章を参照する。設定・checkpoint・OHLCは有限値を検証したJSONで保存し、識別キーと参照はSQLiteの主キー・外部キーで管理する。未対応スキーマや既存の別DBを自動初期化しない。起動時に整合性・外部キー・設定ハッシュ・checkpointとOHLCのサンプル総数・最終値を検証する。
 
 確定OHLCとoutboxのキーは`(run_id, resource_id, minute_start)`。段階1でも確定足と未送信記録を同一トランザクションで作り、再開時の整合性を保つ。送信・送信済み管理・日次化・削除は段階2以降で実装し、この段階では保存した履歴もoutboxも削除しない。日次管理テーブルはまだ作成しない。
 
-### 5.5 段階2の保存・移行仕様（今回の設計範囲）
+### 5.5 段階2の保存・移行仕様（旧案・未実装）
 
 段階2では版1の「全確定足にoutbox必須」「残存OHLCのcount合計=step」という検査をそのまま使わない。[ローカル保存・移行設計0.1](resource-simulator-storage-design.md)を本節の詳細仕様とする。分ごとの永続台帳でpending/ackedとretained/prunedを区別し、outboxはpendingにだけ要求する。確定・削除済みの累積サンプル数と最後の確定位置を保持して、本体削除後にもcheckpointとの整合性と未送信欠落を検査する。
 
-版2への移行は、全runの版1検査・照合済みBackup APIバックアップを先に行い、DDL・データ変換・検査・版更新を1トランザクションで実施する。欠落から送信済み／退避済みを推測せず、失敗時は停止・ROLLBACK・バックアップ保全とする。今回の`persistence.py`と実DBは版1のままなので、outbox／OHLCの手動削除は依然禁止。移行・同期・削除の実装と障害試験は段階2の残作業である。
+版2への移行は、全runの版1検査・照合済みBackup APIバックアップを先に行い、DDL・データ変換・検査・版更新を1トランザクションで実施する。欠落から送信済み／退避済みを推測せず、失敗時は停止・ROLLBACK・バックアップ保全とする。旧案策定時は版1。現行の`persistence.py`はBeta用の版3であり、配送台帳・OHLC送信・削除は未実装。旧版2のSQLを適用せず、将来は版3からの別移行を設計する。outbox／OHLCの手動削除は依然禁止。移行・同期・削除の実装と障害試験は段階2の残作業である。
 
 ## 6. OHLC・日次履歴・期間管理
 
@@ -291,7 +321,7 @@ archive/{simulator_id}/{run_id}/YYYY/MM/DD/{resource_id}.json.gz
 
 パス先頭はコンテナ名である。日次ファイルはschema_version、run_id、resource_id、対象日、時刻系、行数、OHLC配列を持つ。マニフェストにリソース一覧・行数・hash・日次完了状態を記録する。公開のrun一覧と設定説明は秘密を除いたメタデータとして管理する。
 
-1日1ファイル／リソースにすることで、閲覧する1リソースのために100リソース分を転送しない。初期MVPでは1日1ファイルである。1日全体が停止なら分足はなく、その日の欠測を示すマニフェストを必要に応じて残す。
+1日1ファイル／リソースにすることで、閲覧する1リソースのために100リソース分を転送しない。Alpha/Betaでは1日2ファイルを想定する（将来実装）。1日全体が停止なら分足はなく、その日の欠測を示すマニフェストを必要に応じて残す。
 
 ## 8. クラウド同期と障害対応
 
@@ -312,7 +342,11 @@ API障害時はWebで最後に取得した状態を残し、「データ取得�
 
 ### 9.1 APIの初期契約
 
-今回実装するのはGET /api/currentのみ。返却はschema_version、run_id、run_generation、step、R/P相当のresource/parameter、requested_delta、actual_delta、calculated_at、published_at、api_time、simulation_elapsed_seconds、model、stale、stale_after_seconds、history_available=false、build_commit。Tableのサービス側Timestampをpublished_atとし、no-storeを返す。未作成404、読取障害503は固定の公開用エラーのみを返す。/api/runsと/api/ohlcは未実装で、仮の値を返さない。
+現行GET /api/currentは**公開schema_version=2**。DBのuser_version=3とは別の版番号。共通のrun_id、run_generation、step、calculated_atと、順序固定のresources=[Alpha, Beta]を返す。各要素はid/name/available、提供時のみresource/requested_delta/actual_delta/start_step、Alphaのみparameter、Betaのみschedule（第4.1章の公開用項目）を持つ。available=falseのBetaには値を返さない。modelは公開許可した数値キーのみ。秘密・内部パス・DB設定は除外する。
+
+旧Table payload版1を新APIが読み、Alphaと未提供Betaへ正規化して版2を返す。新Webは新API版2と旧API版1の両方を読める。移行中の旧Web用にAlphaのresource/parameter/requested_delta/actual_deltaをトップレベルにも互換項目として残す。新Workerは版2を単一Entityへ条件更新し、同runの同stepでは公開日時を更新しない。送信側・Webは公開版の後退も拒否する。切替はAPI/Web→旧Workerで互換確認→Worker停止/移行→新Worker。旧APIは版2を読めないので、順序を逆にしない。
+
+published_at（Table Timestamp）、api_time、simulation_elapsed_seconds、stale、stale_after_seconds、history_available=false、build_commit、no-storeを維持する。未作成404、障害503は固定メッセージ。/api/runsと/api/ohlcは未実装。詳細な切替・復旧は保存・移行設計9章。
 
 run_generationは版1の追加専用simulation_runs.rowid。runの削除・採番変更は禁止し、将来の移行でも保持する。同じ世代の別UUIDや世代の後退は送信・画面とも拒否する。詳細な同期手順・認証・料金と今回の構築先は[構築・運用](azure-latest-values.md)を正本とする。既存の履歴API契約は後続実装用として維持する。
 
@@ -334,7 +368,8 @@ PC同期とWeb取得は独立した周期である。1秒ポーリングは毎�
 
 ### 9.2 画面構成
 
-- 最新値カード：R、P、実増減量、ステップ／計算経過時間。
+- 共通リソースカード：Alpha、Beta順。各現在量・符号付き実増減量・下限説明。AlphaのP、Betaの昼夜/倍率/基準取得状態。768px以上は同幅2列、未満は1列、320pxで横溢れを防ぐ。Alphaは#F08080/#FFF1F2/#9F303D、Betaは#76A9FA/#EFF6FF/#24569B。
+- 共通step・計算経過時間と日時・通信状態を1回表示。色は識別用で増減方向は符号で示す。
 - 更新情報：計算日時、公開日時、更新停滞、API通信状態。
 - 推移：リソースの1分OHLC、期間選択、欠測・形成中の表示。
 - モデル説明：現在の実行に使われている係数・範囲・下限。
@@ -450,7 +485,7 @@ resource-simulator/
 | API・グラフ・SDK版 | 実装時に互換性、ライセンス、依存を確認して固定 |
 | 月額 | 要求量モデルは作成済み。正確な料金見積もりと実測は未実施 |
 
-本書は構成と処理の設計であり、Azureリソースの作成、資格情報の設定、Web公開はまだ実施していない。
+旧1リソースのAzure公開は実機確認済み。今回のAlpha/Betaはローカル検証までで、本番適用・Windows実機・新しいAzure経路は未検証。
 
 ## 15. 公式参考資料
 

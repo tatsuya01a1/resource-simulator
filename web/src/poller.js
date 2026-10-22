@@ -1,5 +1,6 @@
 export function newer(candidate, previous) {
   if (!previous) return true;
+  if ((candidate.schema_version ?? 1) < (previous.schema_version ?? 1)) return false;
   if (candidate.run_generation !== previous.run_generation) return candidate.run_generation > previous.run_generation;
   return candidate.run_id === previous.run_id && candidate.step >= previous.step;
 }

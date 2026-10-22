@@ -1,10 +1,11 @@
 # 段階2のローカル保存・移行設計
 
-- 文書版：0.1／更新日：2026-10-22
+- 文書版：0.2／更新日：2026-10-22
 - 基準コミット：`cf351ea0808ac9c39b05ce83dd1507a845e455c7`
-- 上位文書：[要件定義書0.4](resource-simulator-requirements.md)、[基本設計書0.4](resource-simulator-basic-design.md)第5〜8章
+- 上位文書：[要件定義書0.6](resource-simulator-requirements.md)、[基本設計書0.6](resource-simulator-basic-design.md)第5〜8章
 - 対応：D-01〜02、D-04〜06、D-09、F-04、AC-04、07、09〜10、12、14〜16
-- 状態：**段階2実装時に採用する設計。今回のコードはスキーマ版1のまま。移行・送信・削除は未実装・未検証。** 計算式、公開API契約、既存AC-IDは変更しない。
+- 状態：**現行実装はAlpha/BetaのDB版3。版1→3の保全付き移行を第9章に記載。第1〜8章は配送台帳の旧版2案（未実装・適用禁止）として残す。OHLC送信・削除・日次退避は未実装。**
+- 改訂0.2：Beta追加とリソース別開始step、旧設定hash保持、原子的保存、明示移行、公開切替/復旧を追加。旧版2案の実装完了を意味しない。将来の配送台帳は版3からの新しいDB版・移行設計を必要とする。
 
 ## 1. 保存するものと責務
 
@@ -16,7 +17,7 @@ OHLC本体を削除しても、分ごとの小さい台帳と実行ごとの累�
 
 ## 2. スキーマ版2の追加・変更
 
-`PRAGMA user_version=2`を使う。既存の実行・checkpoint・分内状態とrun_idは維持する。MVPではDBごとに1シミュレーション、resource_idは`resource`固定。
+旧案では`PRAGMA user_version=2`を予定していた。現行では2を飛ばして3を使い、この旧案を直接適用しない。既存の実行・checkpoint・分内状態とrun_idは維持する。MVPではDBごとに1シミュレーション、当時のresource_idは`resource`固定だった。現行は`resource`と`beta`。
 
 | テーブル | キー・主な列（型） | 参照・制約 |
 | --- | --- | --- |
@@ -67,10 +68,10 @@ O = open_candlesのsample_count（なければ0）
 L == run_progress.finalized_samples_total
 P == run_progress.pruned_samples_total
 R + P == L
-L + O == checkpoint.step
+L + O == checkpoint.step - resource_starts.start_step
 ```
 
-台帳を分順に並べ、first_step=1からlast_stepまで重複・隙間がなく、各範囲の長さ=countであることを検査する。分の実時間には停止の空白を許すが、観測stepの範囲には隙間を許さない。分内状態があれば末尾の`checkpoint.step-O+1..checkpoint.step`に対応し、確定足より後の分であること、close・最終観測日時がcheckpointと一致することを確認する。
+台帳を分順に並べ、first_step=start_step+1からlast_stepまで重複・隙間がなく、各範囲の長さ=countであることを検査する。分の実時間には停止の空白を許すが、観測stepの範囲には隙間を許さない。分内状態があれば末尾の`checkpoint.step-O+1..checkpoint.step`に対応し、確定足より後の分であること、close・最終観測日時がcheckpointと一致することを確認する。
 
 分内状態がなければ、step>0ではrun_progressのlast_finalized_step/close/atがcheckpointと一致することを確認する。最後の台帳の分・last_stepも最後の確定位置と一致させる。step=0なら確定・削除累積値は0、台帳・分内状態なし、初期状態の検証を行う。この方式では最後のOHLC本体も退避後に削除できる。
 
@@ -133,3 +134,63 @@ L + O == checkpoint.step
 - [SQLite Transactions](https://www.sqlite.org/lang_transaction.html)：明示トランザクションでDDL・データ・版更新をまとめる。
 - [SQLite Backup API](https://www.sqlite.org/backup.html)：整合したバックアップを別DBへ作る。
 - [SQLite WAL](https://www.sqlite.org/wal.html)：主DBとWALの関係、同一ホストでの運用。
+
+## 9. 現行：Alpha/Betaの版1→3移行と保存（実装済み・本番未適用）
+
+### 9.1 版と識別の分離
+
+| 版 | 状態 |
+| --- | --- |
+| DB版1 | 実装元・運用中の旧Worker。Alpha相当のみ |
+| DB版2 | 第1〜8章の旧配送台帳案。未実装。版3が含む機能ではない |
+| DB版3 | 今回実装。Beta状態・分内OHLC・リソース開始位置を追加。台帳/削除機能なし |
+| 公開版1/2 | Table payload/APIの版。SQLiteの版番号とは独立 |
+
+Alphaの内部IDは`resource`のまま、表示名だけAlpha。既存candles/outboxの外部キーを含め単純置換しない。simulation_runs.rowid（run_generation）、run_id、step、値、設定JSON・hash、全OHLC、outboxのattempts/next_attempt_atを保持する。
+
+### 9.2 追加データと不変条件
+
+旧6テーブルの構造を変更せず、次を追加する。
+
+- `resource_starts(run_id, resource_id, start_step, initial_value)`：複合主キー、runへのFK。全runのAlphaはstart_step=0。Betaは移行時のactive runにだけ追加し、そのcheckpoint.stepを開始位置とする。終了済み旧runにはBetaを作らない。新規runは両者0。
+- `beta_checkpoints(run_id, state_json)`：runへのFK。Beta step・量・要求/実増減・計算日時とSchedule（基準日・基準値・倍率・有効期間・取得状態）を保存。
+- `beta_open_candles(run_id, candle_json)`：Beta checkpointへのFK。Alphaの既存open_candlesを保持し、確定足/outboxは既存テーブルへresource_id=`beta`で追加する。
+
+Alphaは残存確定count＋分内count=step。Betaは同じ合計=step−start_step。開始checkpointはOHLCのサンプルに数えず、Betaの最初の足はstart_step+1の実観測から。step/timeは両checkpointで一致し、実サンプルがあれば最後のOHLC close/atもcheckpointと一致する。全runを起動検査し、全確定足にoutboxを要求する。台帳のない今回の版でoutboxや本体を削除しない。
+
+各ステップではAlphaから計算済みの実増減量を使ってBeta・Scheduleを計算し、両分内足、境界での両確定足とoutbox、両checkpointを**同一BEGIN IMMEDIATE/COMMIT**で更新する。片方の失敗は全体ROLLBACK。同期は独立接続の読み取りトランザクションで一致した両checkpointだけを公開し、通信を計算トランザクションへ入れない。再開時に旧分を閉じる処理とnew-runも両分内足を同一トランザクションで確定する。
+
+### 9.3 設定とhash
+
+旧6キー設定を引き続き読む。新しい`initial_beta`は初期案100で、新規runまたは移行時のBeta追加にのみ使用。旧runのconfig_json/config_version/rules_hashは**一文字も書き換えない**。旧config_versionは旧キー集合をそのまま正規化してSHA-256照合し、新しい既定キーを入れて再hashしない。新runは7キーを保存する。rules_hashからは全初期値（Alpha/P/Beta）を除くので、Betaキー追加だけでは規則不一致を起こさない。
+
+移行時に選んだBeta初期値はresource_starts.initial_valueを正本とする。旧runの設定JSONにはBetaを追記しない。継続では保存済みAlpha規則・Beta量を優先し、係数変更等は従来どおり`--use-saved-rules`かnew-runを明示する。CLIのconfig_versionも実際に保存した旧hashを報告する。
+
+### 9.4 明示移行コマンド（将来の運用適用時）
+
+今回はテスト用DBだけで実行済み。以下は運用の切替が明示承認された後の手順であり、自動デプロイやWorker起動は行わない。
+
+1. 運用Workerと同期、状態確認等の接続を停止する。DBの絶対パス・旧コードSHA・configを確認し、元DBを削除しない。旧コードと設定も保全する。
+2. 新コードの固定依存を準備し、`uv run --locked python -m resource_simulator migrate --db <絶対DBパス> --config config/simulator.toml`。run/new-runと同じProcessLockを保持する。通常runは版1を拒否し、暗黙移行しない。
+3. コマンドは版1の物理/FK/設定hash/全run OHLC/outboxを検査後、DB横の未使用UUID名`.v1-backup-<uuid>.sqlite3`へBackup APIで保存する。DELETEジャーナルにして閉じ、別readonly接続で論理検査・旧全行とrowid込みhash/件数の一致を確認する。バックアップのfile SHA-256とlogical hash/件数を`.manifest.json`へfsyncしてから変換を開始する。バックアップ不能・照合失敗なら変換しない。
+4. 単一トランザクションで追加DDL・Alpha開始位置・active Beta初期状態を挿入。全旧行のfingerprint一致、全run新不変条件を検査し、最後にuser_version=3としてCOMMIT。旧テーブルのDROP・書換えは行わない。移行中に計算・公開はしない。
+5. 別接続で版3の全検査を実施。出力のbackup/manifestを保持し、`status --db <同じパス>`でrun_id/step/Alpha/Beta開始位置を確認する。移行時のBeta初期checkpointは旧Alphaと同じstep/timeの追加状態で、境界観測や履歴を表さない。最初の次ステップは非連続扱い。
+6. 版3への再実行は検証のみで何も追加せずalready_migratedを返す。版2や未知版は変換しない。
+
+### 9.5 失敗・保全・復旧
+
+- バックアップ/manifest失敗：元DBに変換書込なし。未検証ファイルは復元元にしない。原因を解決して再試行。
+- DDL・Beta作成・検査・version設定で例外：ROLLBACK、版1全体を維持。強制終了時も再接続で版とfingerprintを検査し、検証済みバックアップを保持する。
+- COMMIT結果不明／後検査失敗：自動で上書き復元しない。全接続を閉じ、完全な版1か版3かを調査する。版1なら全検査後再実行、版3なら検査のみ。破損なら主DB/WAL/SHMを一式別の保全先に残す。
+- 明示復旧：全利用プロセス停止後、manifestのbackup_sha256と版1検査を照合したバックアップを**別パス**へ配置し、旧コードで検証する。壊れた元DBや古いWAL/SHMを混在させない。保全・検証後にのみ運用パスへ切り替える。新DBや空DBで初期化する復旧は禁止。
+- 版3で計算後の版1復元は進捗を失う。Tableには進んだ世代/stepがあり得るので、公開Entityを消したり世代を再採番して上書きしない。原則は新コードを修正して前進復旧。旧Workerや旧APIへの単独ロールバックは版3/公開版2を読めず失敗するため、互換API/Webは残して停止値を表示する。
+
+バックアップは元DBと同じローカルディスクのためディスク故障対策ではない。Windowsでの停電・実I/O故障・大量の運用DB容量/移行時間は未検証。
+
+### 9.6 公開切替順序（準備のみ）
+
+1. 今回の作業ブランチをレビューし、明示承認後に既存デプロイ元`codex/stage1-local-worker`へ取り込む。クリーン状態・origin一致を確認する既存deploy.pyのガードは維持する。本作業中はpush/merge/deployしない。
+2. **互換APIとWebを先に**デプロイ。旧Worker・旧Table版1でAlphaが従来値、Betaが未提供となることを確認。旧WebはAlpha互換トップレベル項目で継続できる。新Webも旧API版1を読み取れる。
+3. Worker正常停止、バックアップと版1→3移行、ローカルstatusを確認して新Workerを開始。同期再開後にTable/APIの公開版2・単一resourcesペアとSQLiteの同じrun/step/計算日時を比較する。verify_azure.py --compare-onlyも両resourcesを比較する。
+4. 既取得Webの自動更新、下限表示、04/18境界、停止値/停滞・障害復帰、320px/PCでの2/1列を実運用側でも確認。ビルドSHAを記録。今回のローカル結果をAzure実機結果と読み替えない。
+5. 新Workerから版2を送る前に旧APIを更新しておく。版2取得後は同期・Webとも版の後退を受け入れない。同run/同stepの移行checkpointは再公開しないため、最初の正常な次ステップからペアが公開される。1つのEntityとETagで片方だけの公開を防ぐ。

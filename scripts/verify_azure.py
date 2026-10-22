@@ -22,7 +22,7 @@ def main():
         remote = json.loads(publisher.client.get_entity('resource-simulator', 'current')['payload'])
         manifest = json.loads((ROOT / '.secrets/deployment.json').read_text())
         api = requests.get(manifest['url'] + '/api/current', timeout=20).json()
-        keys = ['run_id', 'run_generation', 'step', 'resource', 'parameter', 'actual_delta', 'calculated_at']
+        keys = ['run_id', 'run_generation', 'step', 'schema_version', 'resources', 'calculated_at']
         assert all(snapshot[k] == remote[k] == api[k] for k in keys)
         print(json.dumps({'pc_storage_api_equal': True, 'step': snapshot['step'], 'keys': keys}))
         return
@@ -39,13 +39,14 @@ def main():
             return client.update_entity(*args, **kwargs)
     try:
         first = deepcopy(snapshot)
-        first['step'] = 1
+        base = snapshot['step']
+        first['step'] = base + 1
         actual.publish(first)
-        delayed = CurrentPublisher(RacingClient(lambda: actual.publish({**first, 'step': 3})), partition)
-        assert delayed.publish({**first, 'step': 2}) is False
-        second = {**first, 'run_generation': first['run_generation'] + 1, 'run_id': str(uuid4()), 'step': 0}
+        delayed = CurrentPublisher(RacingClient(lambda: actual.publish({**first, 'step': base + 3})), partition)
+        assert delayed.publish({**first, 'step': base + 2}) is False
+        second = {**first, 'run_generation': first['run_generation'] + 1, 'run_id': str(uuid4()), 'step': base + 4}
         delayed = CurrentPublisher(RacingClient(lambda: actual.publish(second)), partition)
-        assert delayed.publish({**first, 'step': 100}) is False
+        assert delayed.publish({**first, 'step': base + 100}) is False
         final = json.loads(client.get_entity(partition, 'current')['payload'])
         assert final['run_id'] == second['run_id']
         print(json.dumps({'live_etag_step_race': True, 'live_etag_run_race': True}))

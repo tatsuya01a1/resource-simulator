@@ -18,7 +18,7 @@ from azure.identity import CertificateCredential
 
 from api.current_contract import public_state, should_replace
 from .engine import stamp
-from .persistence import SCHEMA_VERSION, decode_state
+from .persistence import SCHEMA_VERSION, decode_state, decode_beta
 
 
 def committed_snapshot(database):
@@ -34,8 +34,19 @@ def committed_snapshot(database):
         if row is None:
             return None
         state = decode_state(row[3])
-        return public_state({"schema_version": 1, "run_generation": row[0], "run_id": row[1],
-                             **asdict(state), "calculated_at": stamp(state.calculated_at),
+        beta_row = connection.execute("SELECT state_json FROM beta_checkpoints WHERE run_id=?", (row[1],)).fetchone()
+        start = connection.execute("SELECT start_step FROM resource_starts WHERE run_id=? AND resource_id='beta'",
+                                   (row[1],)).fetchone()
+        if beta_row is None or start is None:
+            raise ValueError("incomplete resource snapshot")
+        beta = decode_beta(beta_row[0])
+        if beta.step != state.step or beta.calculated_at != state.calculated_at:
+            raise ValueError("resource checkpoint mismatch")
+        return public_state({"schema_version": 2, "run_generation": row[0], "run_id": row[1],
+                             "step": state.step, "calculated_at": stamp(state.calculated_at),
+                             "resources": [
+                                 {"id": "resource", "available": True, "start_step": 0, **asdict(state)},
+                                 {"id": "beta", "available": True, "start_step": start[0], **asdict(beta)}],
                              "model": json.loads(row[2])})
     finally:
         connection.close()

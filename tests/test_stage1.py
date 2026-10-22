@@ -129,7 +129,7 @@ class PersistenceTests(WorkspaceTest):
             session = self.step(store, session, 0.5, AT + timedelta(minutes=1))
             closed = store.connection.execute("SELECT candle_json FROM candles").fetchone()[0]
             self.assertEqual(json.loads(closed)["sample_count"], 4)
-            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 1)
+            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 2)
             self.assertEqual(session.candle.sample_count, 1)
 
     def test_ac09_restart_within_minute_preserves_open_state(self):
@@ -155,7 +155,7 @@ class PersistenceTests(WorkspaceTest):
             session = self.step(store, session, 0.5, AT + timedelta(minutes=10, seconds=1))
             self.assertEqual(session.state.step, 2)
             self.assertEqual(session.candle.sample_count, 1)
-            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM candles").fetchone()[0], 1)
+            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM candles").fetchone()[0], 2)
         with Store(self.database) as store:
             store.resume(ModelConfig(), AT + timedelta(minutes=10, seconds=2))
 
@@ -171,8 +171,8 @@ class PersistenceTests(WorkspaceTest):
             self.assertNotEqual(new.run_id, resumed.run_id)
             self.assertEqual((new.state.step, new.state.resource, new.state.parameter), (0, 999, 0.5))
             self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM simulation_runs").fetchone()[0], 2)
-            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM candles").fetchone()[0], 1)
-            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 1)
+            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM candles").fetchone()[0], 2)
+            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 2)
 
     def test_rule_changes_require_explicit_choice(self):
         with Store(self.database) as store:
@@ -263,7 +263,7 @@ class PersistenceTests(WorkspaceTest):
             store.connection.execute("DELETE FROM outbox")
             with self.assertRaises(ValidationError):
                 store.resume(ModelConfig(), AT + timedelta(minutes=1))
-            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM candles").fetchone()[0], 1)
+            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM candles").fetchone()[0], 2)
 
     def test_jst_midnight_and_minute_boundary(self):
         jst = timezone(timedelta(hours=9))
@@ -377,8 +377,8 @@ class ProcessTests(WorkspaceTest):
             session = self.step(store, session, 0, AT + timedelta(minutes=1))
             self.assertEqual((session.state.step, session.state.resource), (3, 93))
             snapshot = status(self.database)
-            self.assertEqual(snapshot["closed_candles"], 1)
-            self.assertEqual(snapshot["pending_ohlc"], 1)
+            self.assertEqual(snapshot["closed_candles"], 2)
+            self.assertEqual(snapshot["pending_ohlc"], 2)
 
     def test_ac16_two_processes_and_lock_release_after_kill(self):
         process = self.child("-m", "resource_simulator", "run", "--db", str(self.database))

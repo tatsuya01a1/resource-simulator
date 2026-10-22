@@ -48,3 +48,29 @@ test('floating point differences must not claim that the lower bound was applied
   assert.equal(lowerBoundApplied({ resource: 0, requested_delta: -8, actual_delta: -3 }), true);
   assert.equal(lowerBoundApplied({ resource: 0, requested_delta: -3, actual_delta: -3 }), false);
 });
+
+test('legacy payload provides Alpha and explicit unavailable Beta without zero', async () => {
+  const { resourceList } = await import('../src/model.js');
+  const resources = resourceList({ schema_version: 1, resource: 101, parameter: .1, actual_delta: 1, requested_delta: 1 });
+  assert.equal(resources[0].name, 'Alpha');
+  assert.equal(resources[0].resource, 101);
+  assert.deepEqual(resources[1], { id: 'beta', name: 'Beta', available: false });
+});
+test('whole snapshots move together and v2 cannot regress to an old schema', async () => {
+  const { resourceList } = await import('../src/model.js');
+  const resources = [{ id: 'resource', resource: 102 }, { id: 'beta', resource: 110 }];
+  assert.equal(resourceList({ schema_version: 2, resources }), resources);
+  assert.throws(() => resourceList({ schema_version: 2, resources: resources.slice(0, 1) }));
+  assert.equal(newer({ ...state(20), schema_version: 1 }, { ...state(10), schema_version: 2 }), false);
+  assert.equal(newer({ ...state(10), schema_version: 2 }, { ...state(10), schema_version: 1 }), true);
+});
+test('after a failed request the last whole snapshot is retained until recovery', async () => {
+  let calls = 0;
+  const first = { ...state(1), schema_version: 2, resources: [100, 100] };
+  const next = { ...state(2), schema_version: 2, resources: [102, 110] };
+  const f = fixture(async () => { calls++; if (calls === 2) throw Error('503'); return calls === 1 ? first : next; });
+  f.poller.resume(); await flush();
+  f.tick(1000); await flush(); assert.deepEqual(f.rendered, [first]);
+  f.tick(1000); await flush(); assert.deepEqual(f.rendered, [first, next]);
+  f.poller.pause();
+});

@@ -1,8 +1,12 @@
 # 最新値先行公開の検証記録
 
-版：0.2／2026-10-22。基準コミット：51ba06ce415374ca71e8b040e64cf3310a3a7d00。
+版：0.3／2026-10-22。基準コミット：51ba06ce415374ca71e8b040e64cf3310a3a7d00。
 
 最終デプロイ：`cc721d2b4b5573c92545dd1644d3feda1fad7328`、ブランチ`codex/stage1-local-worker`、SWA production/default。URL：**https://polite-plant-0eb01a400.3.azurestaticapps.net**。APIのbuild_commitとデプロイスクリプトの記録が一致。以後の検証記録の更新コミットはアプリ再デプロイを要しない文書変更として区別する。
+
+## Alpha/Beta追加のローカル検証（今回・Azure未適用）
+
+[Alpha/Beta検証記録](alpha-beta-validation.md)に今回の全結果を記載。旧公開版1と新公開版2の互換、両リソース原子的保存・公開、境界/停止/移行失敗、PC/320pxカードを確認した。DB版3を使い、旧版2案の配送台帳は実装していない。以下のAzure結果は**旧1リソース版の過去の実績**であり、今回の変更のデプロイ成功を示さない。今回運用Workerを停止・再起動しておらず、運用DB・Table・SWAの設定も変更していない。
 
 ## ローカルの確認済み結果
 

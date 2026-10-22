@@ -54,7 +54,7 @@ class MemoryTable:
         self.version += 1
 
 
-class CloudTests(WorkspaceTest):
+class CloudFixture(WorkspaceTest):
     def setUp(self):
         super().setUp()
         self.table = MemoryTable()
@@ -67,6 +67,9 @@ class CloudTests(WorkspaceTest):
                 session = self.step(store, session, .75, AT)
         return committed_snapshot(self.database)
 
+
+
+class CloudTests(CloudFixture):
     def test_reads_only_committed_snapshot_and_keeps_outbox(self):
         self.snapshot()
         with Store(self.database) as store:
@@ -76,7 +79,7 @@ class CloudTests(WorkspaceTest):
             with store.transaction():
                 store.connection.execute("UPDATE checkpoints SET state_json=json_set(state_json,'$.step',99)")
                 self.assertEqual(committed_snapshot(self.database)["step"], 2)
-            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 1)
+            self.assertEqual(store.connection.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 2)
 
     def test_failure_does_not_stop_calculation_and_recovery_publishes_latest(self):
         self.snapshot()
@@ -139,6 +142,61 @@ class CloudTests(WorkspaceTest):
         self.assertNotIn('secret', response)
         self.assertNotIn('PartitionKey', response)
         self.assertEqual(response['simulation_elapsed_seconds'], 0)
+
+class TwoResourceCloudTests(CloudFixture):
+    def old_payload(self, snapshot):
+        result = {key: value for key, value in snapshot.items() if key != 'resources'}
+        result['schema_version'] = 1
+        return result
+
+    def test_old_table_payload_is_upgraded_with_beta_unavailable(self):
+        old = self.old_payload(self.snapshot(1))
+        self.table.create_entity({'payload': json.dumps(old), 'published_at': old['calculated_at']})
+        response = read_current(self.table, now=lambda: AT)
+        self.assertEqual(response['schema_version'], 2)
+        self.assertEqual(response['resources'][0]['name'], 'Alpha')
+        self.assertEqual(response['resources'][0]['resource'], old['resource'])
+        self.assertEqual(response['resources'][1], {'id': 'beta', 'name': 'Beta', 'available': False})
+
+    def test_new_publisher_replaces_old_then_refuses_legacy_downgrade(self):
+        snapshot = self.snapshot(1)
+        old = self.old_payload({**snapshot, 'step': 0})
+        self.publisher.publish(old)
+        self.assertTrue(self.publisher.publish(snapshot))
+        self.assertFalse(self.publisher.publish({**old, 'step': 99}))
+        response = read_current(self.table, now=lambda: AT)
+        self.assertTrue(response['resources'][1]['available'])
+        self.assertEqual(response['step'], 1)
+
+    def test_publication_contains_one_pair_without_private_nested_fields(self):
+        snapshot = self.snapshot(1)
+        snapshot['resources'][1]['private'] = 'secret'
+        snapshot['resources'][1]['schedule']['secret'] = 'secret'
+        snapshot['model']['certificate_path'] = 'private'
+        self.publisher.publish(snapshot)
+        response = read_current(self.table, now=lambda: AT)
+        self.assertNotIn('secret', json.dumps(response))
+        self.assertNotIn('private', json.dumps(response))
+        self.assertEqual([r['id'] for r in response['resources']], ['resource', 'beta'])
+        self.assertEqual(response['resources'][1]['requested_delta'],
+                         response['resources'][1]['schedule']['multiplier'] * response['actual_delta'])
+
+    def test_precommit_and_rollback_never_publish_half_pair(self):
+        self.snapshot(1)
+        with Store(self.database) as store:
+            before = committed_snapshot(self.database)
+            try:
+                with store.transaction():
+                    store.connection.execute("UPDATE beta_checkpoints SET state_json=json_set(state_json,'$.resource',999)")
+                    self.assertEqual(committed_snapshot(self.database), before)
+                    raise OSError('fail before Alpha')
+            except OSError:
+                pass
+            self.assertEqual(committed_snapshot(self.database), before)
+            # Corrupt committed mismatch is rejected, never assembled into a public snapshot.
+            store.connection.execute("UPDATE beta_checkpoints SET state_json=json_set(state_json,'$.step',999)")
+            with self.assertRaises(ValueError):
+                committed_snapshot(self.database)
 
 
 if __name__ == '__main__':

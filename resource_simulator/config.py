@@ -32,12 +32,13 @@ class ModelConfig:
     parameter_max: float = 1.0
     coefficient: float = 10.0
     interval_seconds: float = 1.0
+    initial_beta: float = 100.0
 
     def __post_init__(self) -> None:
         for key, value in asdict(self).items():
             object.__setattr__(self, key, finite(value, key))
-        if self.initial_resource < 0:
-            raise ValidationError("initial_resource must be >= 0")
+        if self.initial_resource < 0 or self.initial_beta < 0:
+            raise ValidationError("initial_resource and initial_beta must be >= 0")
         if not self.parameter_min < self.parameter_max:
             raise ValidationError("parameter_min must be < parameter_max")
         finite(self.parameter_max - self.parameter_min, "parameter span")
@@ -52,7 +53,7 @@ class ModelConfig:
     @property
     def rules_hash(self) -> str:
         rules = asdict(self)
-        del rules["initial_resource"], rules["initial_parameter"]
+        del rules["initial_resource"], rules["initial_parameter"], rules["initial_beta"]
         return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
 
     @property
@@ -66,6 +67,7 @@ def load_config(path: Path) -> ModelConfig:
     if set(document) != {"model"} or not isinstance(document["model"], dict):
         raise ValidationError("configuration must contain only the [model] table")
     values = document["model"]
-    if set(values) != set(ModelConfig.__dataclass_fields__):
+    if set(values) not in (set(ModelConfig.__dataclass_fields__),
+                           set(ModelConfig.__dataclass_fields__) - {"initial_beta"}):
         raise ValidationError("[model] must contain exactly the documented model keys")
     return ModelConfig(**values)

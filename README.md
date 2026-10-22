@@ -6,7 +6,7 @@
 
 ## MVPの構成
 
-自宅Windows PCのWorkerが1リソース・1動的パラメータを毎秒計算し、SQLiteへ保存する。Azureへ最新状態と1分OHLCを同期し、PC・スマートフォンから閲覧する。
+自宅Windows PCのWorkerがAlpha・Betaの2リソース・1動的パラメータを毎秒計算し、SQLiteへ保存する。Azureへ最新状態と1分OHLCを同期し、PC・スマートフォンから閲覧する。
 
 - Workerの起動・停止・設定変更はローカルで行う。
 - PC停止中も同期済みの最新値と履歴を閲覧できる。
@@ -19,12 +19,20 @@
 ## Codexへの入口
 
 1. [AGENTS.md](AGENTS.md)を読む。
-2. [ドキュメント案内](docs/README.md)から[要件定義書0.5](docs/resource-simulator-requirements.md)と[基本設計書0.5](docs/resource-simulator-basic-design.md)を読む。MVP要件と既存ACを維持し、最新値の先行公開を追記した。
+2. [ドキュメント案内](docs/README.md)から[要件定義書0.6](docs/resource-simulator-requirements.md)と[基本設計書0.6](docs/resource-simulator-basic-design.md)を読む。MVP要件と既存ACを維持し、最新値の先行公開を追記した。
 3. 基本設計書第13章の段階に沿って実装し、要件定義書第8章の受入条件で検証する。
 
 要件定義書を優先し、初期案と確定要件を区別する。数値モデル・API等の詳細は各文書を正本とし、このREADMEに複製しない。
 
 ## 現在の状態
+
+Alpha/Betaの計算・原子的保存・最新値公開版2・レスポンシブカードを実装し、ローカル検証済み。Alphaは旧内部ID `resource` と値・履歴を引き継ぐ。Betaは同じstepのAlpha実増減量に連動する。時間帯の規則は[基本設計4.1章](docs/resource-simulator-basic-design.md)、移行と切替・復旧は[保存・移行設計9章](docs/resource-simulator-storage-design.md)、テスト結果は[Alpha/Beta検証記録](docs/alpha-beta-validation.md)。
+
+**今回の変更は運用Worker・運用DB・Azureへ未適用**。DBは旧版1→現行版3（配送台帳の旧版2案は未実装）、公開スキーマは独立した版2。旧DBを削除して作り直さない。運用適用は別途明示された切替作業で行う。
+
+採用初期案：Beta初期値100（`[model].initial_beta`で指定）、下限0、基準値不足の夜は倍率5と「基準値未確定」。連続観測の許容間隔2.5秒。確定したxは午前0時でも保持し翌04時に失効する。詳細な式を変更する場合は基本設計も更新する。
+
+### 旧1リソースの公開記録（今回の2リソース版のデプロイ記録ではない）
 
 最新値公開の実装・Azure実機確認済み。公開URLは **https://polite-plant-0eb01a400.3.azurestaticapps.net** 。デプロイ元は`codex/stage1-local-worker`、デプロイSHAは`cc721d2b4b5573c92545dd1644d3feda1fad7328`。PC Workerから非公開Azure Tableへコミット済み最新値を同期し、APIとReact Webで初回取得・約1秒更新・停滞表示を行う。結果は[最新値公開検証記録](docs/latest-values-validation.md)、構築・料金・認証は[Azure構築・運用](docs/azure-latest-values.md)。OHLCクラウド同期・日次化・退避・履歴グラフは後続。
 
@@ -47,7 +55,7 @@ uv run --locked python scripts/worker_control.py stop
 uv run --locked python -m resource_simulator run --db .secrets/worker.sqlite3 --cloud-config .secrets/cloud.toml
 ```
 
-同期を付けてもDB版は1のまま。通信失敗時も計算・保存を継続し、回復後は最新checkpointだけを送る。OHLCとoutboxは保持し、手動削除しない。現在の公開Webは閲覧専用で、履歴グラフは未実装。
+旧版の同期導入時はDB版1のままだった。今回の新Workerを既存DBで使う前に、停止・バックアップ付き明示移行で版3へ変換する。通信失敗時も計算・保存を継続し、回復後は最新checkpointだけを送る。OHLCとoutboxは保持し、手動削除しない。現在の公開Webは閲覧専用で、履歴グラフは未実装。
 
 ### 段階1時点の記録（以下は過去の状態）
 
@@ -57,7 +65,19 @@ uv run --locked python -m resource_simulator run --db .secrets/worker.sqlite3 --
 
 `cf351ea`を基準とするレビュー修正では、通常の予定期限を1秒ずつ進めるよう計算周期を修正した。保存が0.2秒でも通常の開始は1・2・3秒となり、保存時間が毎周期に加算されない。次期限に間に合わない場合は、保存完了から1秒後へ期限を立て直して高速な追いつき計算を防ぐ。Windows・固定Pythonで既存29件＋追加3件の計32テストが成功している。
 
-段階2の配送台帳・退避後の再開・版1→2移行方法は[保存・移行設計0.1](docs/resource-simulator-storage-design.md)に具体化した。**保存設計だけを追加した段階で、現在のコードとDBスキーマは版1のまま**。移行・送信・削除はまだ実装しておらず、既存DBのoutboxやOHLCを手動で削除してはいけない。今後はackedのoutbox削除、確認済み退避後の本体削除、欠落検出を同時に成立させる版2を実装・検証する。
+段階2の配送台帳・退避後の再開・版1→2移行方法は[保存・移行設計0.1](docs/resource-simulator-storage-design.md)に具体化した。**保存設計だけを追加した当時はコードとDBスキーマは版1のままだった**。移行・送信・削除はまだ実装しておらず、既存DBのoutboxやOHLCを手動で削除してはいけない。配送台帳は未実装。現行版3からの将来の別移行で、ackedのoutbox削除、確認済み退避後の本体削除、欠落検出を同時に成立させる。
+
+## 既存DBの移行と公開切替（準備済み・本番未実行）
+
+[保存・移行設計9章](docs/resource-simulator-storage-design.md)の保全・復旧・切替順序を読む。先に互換API/Webをデプロイして旧データのAlphaとBeta未提供表示を確認し、その後にWorkerを停止して移行する。運用反映が明示された場合だけ、対象の絶対DBパスを確認して以下を実行する。
+
+```powershell
+# Workerと全DB利用プロセスを停止後。通常runは版1を暗黙変換しない。
+uv run --locked python -m resource_simulator migrate --db <絶対DBパス> --config config/simulator.toml
+uv run --locked python -m resource_simulator status --db <同じ絶対DBパス>
+```
+
+移行コマンドが出力する検証済みbackupとmanifestを保持する。元の全Alpha行・rowid/世代・設定hash・outbox再試行情報を照合し、Betaだけを現在stepから追加する。Betaの追加前履歴は作らない。移行済みDBへの再実行は検査だけを行う。失敗時にDBを消さず、元DB/WAL/SHMを保全する。進捗のある版3を古いバックアップへ自動で戻さない。
 
 ## セットアップ（Windows 11・PowerShell）
 
@@ -144,6 +164,22 @@ uv run --locked python -c "import pathlib,sqlite3,sys; source=sqlite3.connect(pa
 バックアップから戻す場合はWorkerと状態確認プロセスを停止し、元のDB・WAL・SHMを一式別ディレクトリへ保全してから、元DBパスへバックアップを配置する。古いWAL・SHMを復元DBに混在させない。PCディスク故障時の無損失復旧・バックアップ復元の実機試験は未検証。
 
 ## テストと検証範囲
+
+最新の2リソース検証（Azureを使わず一時DBで実施）：
+
+```powershell
+uv run --locked python -m unittest discover -s tests -v
+api/.venv/Scripts/python.exe -m unittest discover -s api/tests -v
+npm.cmd --prefix web ci
+npm.cmd --prefix web test
+npm.cmd --prefix web run build
+node web/tests/local-browser.mjs
+git diff --check
+```
+
+local-browser.mjsはビルド済みWebをローカルで検証し、運用Workerを起動停止しない。PlaywrightのChromiumが必要。Linuxでは`CHROMIUM_PATH=/usr/bin/chromium node web/tests/local-browser.mjs`も使える。APIの固定環境の準備は[構築記録](docs/azure-latest-values.md)。旧`web/tests/browser.mjs`は運用Workerの停止・起動を伴うため、今回のローカル検証では使用しない。
+
+以下は段階1からの検証手順・説明：
 
 ```powershell
 uv run --locked python -m unittest discover -s tests -v

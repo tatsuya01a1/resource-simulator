@@ -33,7 +33,7 @@ def positive_int(value: str) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Local resource simulation Worker")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("run", "new-run", "status"):
+    for name in ("run", "new-run", "status", "migrate"):
         command = commands.add_parser(name)
         command.add_argument("--db", type=Path, default=default_database())
         if name != "status":
@@ -54,6 +54,10 @@ def main(argv=None) -> int:
         # Validate before creating or changing the recovery database.
         config = load_config(args.config)
         with ProcessLock(args.db):
+            if args.command == "migrate":
+                from .migration import migrate
+                print(json.dumps(migrate(args.db, config), indent=2))
+                return 0
             handler = RotatingFileHandler(args.db.resolve().parent / "worker.log",
                                           maxBytes=1_000_000, backupCount=3, encoding="utf-8")
             handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
@@ -65,7 +69,9 @@ def main(argv=None) -> int:
                                        new_run=args.command == "new-run",
                                        use_saved_rules=getattr(args, "use_saved_rules", False))
                 print(json.dumps({"run_id": session.run_id, "step": session.state.step,
-                                  "config_version": session.config.config_hash}), flush=True)
+                                  "config_version": store.connection.execute(
+                                      "SELECT config_version FROM simulation_runs WHERE run_id=?",
+                                      (session.run_id,)).fetchone()[0]}), flush=True)
                 logging.info("Worker initialized run=%s step=%s", session.run_id, session.state.step)
                 if args.command == "run":
                     stop = Event()
