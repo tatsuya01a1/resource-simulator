@@ -14,6 +14,8 @@ PC→非公開Table→SWA Managed Functions→匿名閲覧Webの最新値だけ�
 
 Workerは既定Pythonを変えず3.13.16を維持し、Azure SDKはuv.lockで固定。APIは独立したPython 3.11。最新azure-functions 2系はPython>=3.13のため採用せず、3.11対応の1.25.0を選び、全依存をapi/requirements.txtへ固定する。WebはReact・TypeScript・Viteの固定版とpackage-lock.jsonを使う。
 
+SWA CLI 2.1.0はAPIビルドを省略するため、`scripts/deploy.py`でLinux CPython 3.11向けwheelを`.python_packages/lib/site-packages`へ明示的に梱包する。HTTP関数は`api/current/function.json`にGET専用・匿名を定義し、`api/handler.py`を呼ぶ。Windowsのapi/.venvや秘密情報はアップロードしない。デプロイ前に作業ブランチ・Git作業ツリーのクリーン状態・originとHEADの一致を検査し、APIのBUILD_COMMITへそのSHAを設定する。
+
 ## 保存と巻き戻り防止
 
 同期スレッドは毎回SQLiteの読み取り専用トランザクションからactive_run・設定・checkpointを読む。計算トランザクションでは通信しない。待ち行列を作らず、失敗後は最大30秒程度のバックオフ後にその時点の最新値を取り直す。OHLC・outboxは変更しない。

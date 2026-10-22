@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(ROOT / 'scripts'))
 from azure_setup import az
 
@@ -32,11 +33,21 @@ def main():
        '/config/appsettings?api-version=2023-12-01', '--body', '@' + str(settings_file))
     subprocess.run(['npm.cmd', '--prefix', 'web', 'run', 'build'], cwd=ROOT, check=True)
     # Only API source and lock enter the deployment; no local venv or credentials.
-    stage = ROOT / '.cache' / 'api-deploy'
+    stage = ROOT / '.cache' / 'api-deploy' / commit
     stage.mkdir(parents=True, exist_ok=True)
-    for path in (ROOT / 'api').iterdir():
-        if path.suffix == '.py' or path.name in ('host.json', 'requirements.txt'):
-            (stage / path.name).write_bytes(path.read_bytes())
+    for path in (ROOT / 'api').rglob('*'):
+        relative = path.relative_to(ROOT / 'api')
+        if any(part.startswith('.') or part == '__pycache__' for part in relative.parts):
+            continue
+        if path.is_file() and (path.suffix == '.py' or path.name in ('host.json', 'requirements.txt', 'function.json')):
+            target = stage / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(path.read_bytes())
+    # SWA CLI skips API builds. Package Linux CPython 3.11 wheels explicitly;
+    # never upload this Windows machine's venv/site-packages.
+    subprocess.run(['uv', 'pip', 'install', '--target', str(stage / '.python_packages/lib/site-packages'),
+                    '--python-version', '3.11', '--python-platform', 'x86_64-manylinux_2_17',
+                    '--only-binary', ':all:', '-r', 'api/requirements.txt'], cwd=ROOT, check=True)
     env = os.environ.copy()
     env['SWA_CLI_DEPLOYMENT_TOKEN'] = (secrets / 'swa-token.txt').read_text().strip()
     env['SWA_CLI_TELEMETRY_OPTOUT'] = '1'

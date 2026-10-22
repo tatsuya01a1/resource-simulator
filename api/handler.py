@@ -8,10 +8,6 @@ from azure.data.tables import TableClient
 
 from current_service import read_current
 
-app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
-
-
-@app.route(route="current", methods=["GET"])
 def current(req: func.HttpRequest) -> func.HttpResponse:
     headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
     try:
