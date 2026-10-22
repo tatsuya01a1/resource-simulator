@@ -1,9 +1,9 @@
 # リソース管理シミュレータ 基本設計書
 
-- 文書バージョン：0.4
+- 文書バージョン：0.5
 - 作成日：2026-10-11／更新日：2026-10-22
 - 対象：PC Worker + Azure公開／保存構成のMVP
-- 上位文書：[要件定義書 0.4](resource-simulator-requirements.md)（0.3の機能要件・ACを維持し環境条件のみ追記）
+- 上位文書：[要件定義書 0.5](resource-simulator-requirements.md)（従来のMVP要件・ACを維持し最新値先行公開を追記）
 - 位置付け：要件を実現する配置、技術構成、処理、データ、API、運用の初期設計。
 - 状態：Azure採用とユーザー提示条件は確定。サービスの個別構成・数値モデル等は設計上の初期案。デプロイ／実機検証は未実施。
 
@@ -14,6 +14,8 @@
 0.3（2026-10-22）：ユーザー指示によりWorkerのPython 3.10前提を撤回し、3.13系の最新パッチ候補を確認して3.13.16へ固定。外部依存なしで設定を読み込むためYAML初期案をTOMLへ変更し、段階1の保存・ロック・復元・実装配置を具体化した。計算式・計算例・API契約・AC-01〜20は変更しない。クラウドAPIのランタイムは引き続き別途検証する。
 
 0.4（2026-10-22）：`cf351ea`のレビューに基づき計算周期の期限更新を修正。段階2での送信済みoutbox削除・退避済みOHLC削除後の再開、欠落検出、スキーマ版1→2の保全付き移行を[保存・移行設計0.1](resource-simulator-storage-design.md)として具体化した。今回は周期修正・テスト・設計のみであり、保存コードは版1のまま。計算モデル、API契約、要件定義書0.4の要件・ACは変更しない。
+
+0.5（2026-10-22）：`51ba06c`を基準に最新値先行公開を実装。詳細は[構築・運用記録](azure-latest-values.md)と[最新値公開の検証記録](latest-values-validation.md)。別スレッドでコミット済みcheckpointのみを読み、ETagとrun_generationで巻戻りを防止する。APIはPython 3.11＋azure-functions 1.25.0、WebはReact/TypeScript/Vite。OHLC・outboxを変更・削除しないためDBは版1を維持し、復元検査は弱めない。版2移行・履歴同期は後続。
 
 ## 1. 設計思想と決定理由
 
@@ -94,6 +96,8 @@ flowchart TD
 | 日次履歴・古い履歴 | Azure Blob Storage | Standard GPv2、LRSを初期候補とする |
 | 履歴形式 | JSON + gzip | 日次・リソース単位。圧縮は初回ファイル作成時から実施 |
 | 基盤定義 | Bicep、バージョン管理 | 課金する常駐VMやApp Serviceプランは置かない |
+
+最新値先行公開ではWorkerにazure-data-tables 12.7.0・azure-identity 1.26.0を追加し、全推移依存をuv.lockへ固定した。APIはPython 3.11.17で互換性を検証し、全依存をapi/requirements.txtへ固定。現行azure-functions 2系はPython>=3.13のためManaged Functionsの3.11では使わず、1.25.0を選んだ。APIはWorkerのpyprojectを参照しない。uvは`python-downloads=manual`として明示インストールだけを許し、自動ダウンロードを行わない。
 
 WorkerとクラウドAPIのランタイムは独立して選定する。2026-10-11に確認したSWA対応表ではPython 3.11がManaged Functionsに掲載されていたため、クラウドAPIは3.11を初期候補としている。今回のWorker変更をAPIへ適用しない。API実装時に最新の対応表・サポート期限・SDK互換性を再確認する（参考資料S-01、S-02）。
 
@@ -307,6 +311,10 @@ API障害時はWebで最後に取得した状態を残し、「データ取得�
 ## 9. WebとRead API
 
 ### 9.1 APIの初期契約
+
+今回実装するのはGET /api/currentのみ。返却はschema_version、run_id、run_generation、step、R/P相当のresource/parameter、requested_delta、actual_delta、calculated_at、published_at、api_time、simulation_elapsed_seconds、model、stale、stale_after_seconds、history_available=false、build_commit。Tableのサービス側Timestampをpublished_atとし、no-storeを返す。未作成404、読取障害503は固定の公開用エラーのみを返す。/api/runsと/api/ohlcは未実装で、仮の値を返さない。
+
+run_generationは版1の追加専用simulation_runs.rowid。runの削除・採番変更は禁止し、将来の移行でも保持する。同じ世代の別UUIDや世代の後退は送信・画面とも拒否する。詳細な同期手順・認証・料金と今回の構築先は[構築・運用](azure-latest-values.md)を正本とする。既存の履歴API契約は後続実装用として維持する。
 
 | API | 内容 | 制約 |
 | --- | --- | --- |

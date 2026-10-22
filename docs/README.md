@@ -6,11 +6,13 @@
 
 | 順序 | 文書 | 版 | 役割 |
 | --- | --- | --- | --- |
-| 1 | [要件定義書](resource-simulator-requirements.md) | 0.4 | 0.3の機能・ACを維持し、Worker環境条件C-16を追記 |
-| 2 | [基本設計書](resource-simulator-basic-design.md) | 0.4 | 構成、数値モデル、周期修正、段階2保存設計への参照 |
+| 1 | [要件定義書](resource-simulator-requirements.md) | 0.5 | MVP要件・ACを維持し最新値先行公開を追記 |
+| 2 | [基本設計書](resource-simulator-basic-design.md) | 0.5 | 最新値の同期・API・Webと保存設計 |
 | 3 | [Codex作業指針](../AGENTS.md) | — | 文書の扱い、実装範囲、進め方と検証の記録 |
 | 4 | [段階1検証記録](stage1-validation.md) | 2 | 実行環境、AC別テスト結果、レビュー修正32テスト、未検証事項 |
 | 5 | [段階2の保存・移行設計](resource-simulator-storage-design.md) | 0.1 | 配送状態と未送信欠落の区別、履歴削除後の検査、版1→2の保全付き移行。設計のみ |
+| 6 | [最新値公開の構築・運用](azure-latest-values.md) | 0.1 | Azure構築、認証、料金、デプロイ手順 |
+| 7 | [最新値公開の検証記録](latest-values-validation.md) | 0.1 | 最新値先行公開のテストと実機確認 |
 
 2026-10-11に初期文書を登録し、2026-10-22にPython方針の変更と段階1の実装を反映した。既存の要件ID・AC-IDを変更せず、環境条件C-16を追加した。この案内とAGENTS.mdは導線であり、要件・設計の代替ではない。以後の実装でも版と改訂履歴を更新する。
 

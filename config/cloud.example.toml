@@ -1,0 +1,7 @@
+[cloud]
+endpoint = "https://YOUR_ACCOUNT.table.core.windows.net"
+table = "CurrentState"
+partition = "resource-simulator"
+tenant_id = "YOUR_TENANT_ID"
+client_id = "YOUR_WORKER_APP_ID"
+certificate_path = "worker.pem"

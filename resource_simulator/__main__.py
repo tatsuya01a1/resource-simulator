@@ -10,7 +10,7 @@ from pathlib import Path
 import signal
 import sqlite3
 import sys
-from threading import Event
+from threading import Event, Thread
 
 from .config import load_config
 from .locking import AlreadyRunning, ProcessLock
@@ -41,6 +41,9 @@ def main(argv=None) -> int:
         if name == "run":
             command.add_argument("--steps", type=positive_int)
             command.add_argument("--use-saved-rules", action="store_true")
+            command.add_argument("--cloud-config", type=Path,
+                                 help="Enable certificate-authenticated latest-state sync")
+            command.add_argument("--stop-file", type=Path, help="Local file requests graceful shutdown")
     args = parser.parse_args(argv)
     handler = None
     previous_handlers = {}
@@ -66,9 +69,29 @@ def main(argv=None) -> int:
                 logging.info("Worker initialized run=%s step=%s", session.run_id, session.state.step)
                 if args.command == "run":
                     stop = Event()
+                    if args.stop_file:
+                        def watch_stop():
+                            while not stop.wait(.25):
+                                if args.stop_file.exists():
+                                    stop.set()
+                        Thread(target=watch_stop, daemon=True, name="local-stop-file").start()
                     for signum in (signal.SIGINT, signal.SIGTERM):
                         previous_handlers[signum] = signal.signal(signum, lambda *_: stop.set())
-                    run(store, session, stop, steps=args.steps)
+                    sync = None
+                    if args.cloud_config:
+                        from .cloud import LatestSync, configured_publisher
+                        # Credential/network failures remain in the IO thread.
+                        try:
+                            sync = LatestSync(args.db, configured_publisher(args.cloud_config))
+                            sync.start()
+                        except Exception as exc:
+                            logging.warning("latest_sync_configuration_failed type=%s", type(exc).__name__)
+                    try:
+                        run(store, session, stop, steps=args.steps)
+                    finally:
+                        stop.set()
+                        if sync:
+                            sync.close()
         return 0
     except (OSError, sqlite3.Error, ValueError, AlreadyRunning, KeyError, TypeError) as exc:
         if handler:

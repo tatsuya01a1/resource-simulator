@@ -16,3 +16,10 @@ __pycache__/
 *.pfx
 *.p12
 data/
+node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+api/.venv/
+api/.python_packages/
+.secrets/

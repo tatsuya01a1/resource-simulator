@@ -1,0 +1,2 @@
+azure-functions>=1.24,<2
+azure-data-tables==12.7.0

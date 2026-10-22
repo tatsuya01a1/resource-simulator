@@ -19,12 +19,35 @@
 ## Codexへの入口
 
 1. [AGENTS.md](AGENTS.md)を読む。
-2. [ドキュメント案内](docs/README.md)から[要件定義書0.4](docs/resource-simulator-requirements.md)と[基本設計書0.4](docs/resource-simulator-basic-design.md)を読む。要件0.3の機能・ACは維持し、要件0.4ではユーザー指定のWorker環境だけを追記した。
+2. [ドキュメント案内](docs/README.md)から[要件定義書0.5](docs/resource-simulator-requirements.md)と[基本設計書0.5](docs/resource-simulator-basic-design.md)を読む。MVP要件と既存ACを維持し、最新値の先行公開を追記した。
 3. 基本設計書第13章の段階に沿って実装し、要件定義書第8章の受入条件で検証する。
 
 要件定義書を優先し、初期案と確定要件を区別する。数値モデル・API等の詳細は各文書を正本とし、このREADMEに複製しない。
 
 ## 現在の状態
+
+最新値公開の実装：PC Workerから非公開Azure Tableへコミット済みの最新値を同期し、Read APIとReact Webで初回取得・約1秒更新・停滞表示を行う。実機検証の結果・公開URL・デプロイコミットは[最新値公開検証記録](docs/latest-values-validation.md)、構築・料金・認証は[Azure構築・運用](docs/azure-latest-values.md)を参照。過去の段階1記録は以下に保持する。OHLCクラウド同期・日次化・退避・履歴グラフは後続。
+
+### 最新値同期を使うWorkerの起動・停止
+
+初期構築後は、固定環境で次を実行する。開発者のAzure CLIログインはWorkerの認証に使わない。
+
+```powershell
+uv sync --locked
+uv run --locked python scripts/worker_control.py start
+uv run --locked python scripts/worker_control.py status
+uv run --locked python scripts/worker_control.py stop
+```
+
+この補助コマンドはWindows上でコンソールを開かず常駐し、ローカルの停止ファイルで正常停止する。PIDと停止ファイルは`.secrets`内。計算用SQLite・ログも同フォルダーに置き、既存の別DBは変更しない。証明書・設定の初期構築は`docs/azure-latest-values.md`を参照。PC再起動後の自動起動登録はまだ行わない。
+
+端末で直接実行する場合（停止はCtrl+C）：
+
+```powershell
+uv run --locked python -m resource_simulator run --db .secrets/worker.sqlite3 --cloud-config .secrets/cloud.toml
+```
+
+同期を付けてもDB版は1のまま。通信失敗時も計算・保存を継続し、回復後は最新checkpointだけを送る。OHLCとoutboxは保持し、手動削除しない。現在の公開Webは閲覧専用で、履歴グラフは未実装。
 
 2026-10-22：基本設計第13章の段階1を実装。計算Engine、TOML設定検証、SQLiteへの原子的保存、単一起動、保存済み状態からの再開、1分OHLCと分内状態の復元をWindowsで検証済み。確定足と未送信記録も同じトランザクションで保持する。Azureへの送信はまだ行わない。
 
