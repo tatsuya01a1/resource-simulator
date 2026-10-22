@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPoller, newer } from '../src/poller.js';
+import { lowerBoundApplied } from '../src/model.js';
 
 const state = (step, generation = 1) => ({ step, run_generation: generation, run_id: `run-${generation}` });
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
@@ -41,4 +42,9 @@ test('step, generation and UUID guard against rollbacks', () => {
   assert.equal(newer(state(100), state(0, 2)), false);
   assert.equal(newer(state(0, 2), state(100)), true);
   assert.equal(newer({ ...state(50), run_id: 'another' }, state(1)), false);
+});
+test('floating point differences must not claim that the lower bound was applied', () => {
+  assert.equal(lowerBoundApplied({ resource: 446.71, requested_delta: -9.956822504762497, actual_delta: -9.9568225047625 }), false);
+  assert.equal(lowerBoundApplied({ resource: 0, requested_delta: -8, actual_delta: -3 }), true);
+  assert.equal(lowerBoundApplied({ resource: 0, requested_delta: -3, actual_delta: -3 }), false);
 });

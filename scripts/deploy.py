@@ -37,7 +37,7 @@ def main():
     stage.mkdir(parents=True, exist_ok=True)
     for path in (ROOT / 'api').rglob('*'):
         relative = path.relative_to(ROOT / 'api')
-        if any(part.startswith('.') or part == '__pycache__' for part in relative.parts):
+        if any(part.startswith('.') or part in ('__pycache__', 'tests') for part in relative.parts):
             continue
         if path.is_file() and (path.suffix == '.py' or path.name in ('host.json', 'requirements.txt', 'function.json')):
             target = stage / relative
