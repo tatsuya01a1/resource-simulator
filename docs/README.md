@@ -10,10 +10,10 @@
 | 2 | [基本設計書](resource-simulator-basic-design.md) | 0.6 | Beta計算・境界・公開版2と保存設計 |
 | 3 | [Codex作業指針](../AGENTS.md) | — | 文書の扱い、実装範囲、進め方と検証の記録 |
 | 4 | [段階1検証記録](stage1-validation.md) | 2 | 実行環境、AC別テスト結果、レビュー修正32テスト、未検証事項 |
-| 5 | [段階2の保存・移行設計](resource-simulator-storage-design.md) | 0.2 | 第9章に現行版1→3移行。旧配送台帳案は未実装 |
-| 6 | [最新値公開の構築・運用](azure-latest-values.md) | 0.3 | 旧Azure構築記録と2リソース切替手順への導線 |
+| 5 | [段階2の保存・移行設計](resource-simulator-storage-design.md) | 0.3 | 第9章の版1→3を運用適用済み。旧配送台帳案は未実装 |
+| 6 | [最新値公開の構築・運用](azure-latest-values.md) | 0.4 | 既存AzureへのAlpha/Beta本番公開と切替手順 |
 | 7 | [最新値公開の検証記録](latest-values-validation.md) | 0.3 | 旧Azure結果と今回のローカル検証の区別 |
-| 8 | [Alpha/Beta検証記録](alpha-beta-validation.md) | 0.2 | Linux結果とWindows運用DBコピーの移行・70＋5ステップ・独立復元、本番未切替 |
+| 8 | [Alpha/Beta検証記録](alpha-beta-validation.md) | 0.3 | Linux・Windowsリハーサルと本番切替、SQLite/Table/API実通信・公開画面の確認 |
 
 2026-10-11に初期文書を登録し、2026-10-22にPython方針の変更と段階1の実装を反映した。既存の要件ID・AC-IDを変更せず、環境条件C-16を追加した。この案内とAGENTS.mdは導線であり、要件・設計の代替ではない。以後の実装でも版と改訂履歴を更新する。
 
@@ -36,7 +36,7 @@
 
 ## 現在の状態
 
-Alpha/Betaの実装はローカル検証済み、運用Worker/DB/Azureは未適用。[Alpha/Beta検証記録](alpha-beta-validation.md)に実施コマンド・結果・未検証事項を記載した。数値モデルは基本設計4.1章、現行DB版3と公開版2、停止・移行・復旧・切替は保存・移行設計9章。旧「DB版2の配送台帳」は未実装の設計で、現行版3に含まれない。
+Alpha/Beta版は2026-10-23に本番公開済み。運用DB版3・新Worker常駐稼働、公開版2の実通信とPC/モバイル幅を確認した。[Alpha/Beta検証記録](alpha-beta-validation.md)に実施コマンド・結果・未検証事項を記載した。数値モデルは基本設計4.1章、現行DB版3と公開版2、停止・移行・復旧・切替は保存・移行設計9章。旧「DB版2の配送台帳」は未実装の設計で、現行版3に含まれない。
 
 以下は旧1リソース版の実績：
 

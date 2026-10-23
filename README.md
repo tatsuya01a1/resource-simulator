@@ -26,9 +26,9 @@
 
 ## 現在の状態
 
-Alpha/Betaの計算・原子的保存・最新値公開版2・レスポンシブカードを実装し、ローカル検証済み。Alphaは旧内部ID `resource` と値・履歴を引き継ぐ。Betaは同じstepのAlpha実増減量に連動する。時間帯の規則は[基本設計4.1章](docs/resource-simulator-basic-design.md)、移行と切替・復旧は[保存・移行設計9章](docs/resource-simulator-storage-design.md)、テスト結果は[Alpha/Beta検証記録](docs/alpha-beta-validation.md)。
+2026-10-23にAlpha/Beta版を本番公開し、運用Workerを常駐稼働中。計算・原子的保存・最新値公開版2・レスポンシブカードをWindowsとAzure実通信で確認済み。Alphaは旧内部ID `resource` と値・履歴を引き継ぐ。Betaは同じstepのAlpha実増減量に連動する。時間帯の規則は[基本設計4.1章](docs/resource-simulator-basic-design.md)、移行と切替・復旧は[保存・移行設計9章](docs/resource-simulator-storage-design.md)、テスト結果は[Alpha/Beta検証記録](docs/alpha-beta-validation.md)。
 
-**今回の変更は運用Worker・運用DB・Azureへ未適用**。DBは旧版1→現行版3（配送台帳の旧版2案は未実装）、公開スキーマは独立した版2。旧DBを削除して作り直さない。運用適用は別途明示された切替作業で行う。
+**運用DBは保全付きで版1→3へ移行済み**。公開スキーマは独立した版2。公開URLは **https://polite-plant-0eb01a400.3.azurestaticapps.net**、デプロイSHAは`547adcbb565b5278fa23622b96c616e8098b4b34`（後続の記録コミットとは別）。同じrun/世代を保持して両値の本番更新を確認した。[本番切替記録](docs/alpha-beta-validation.md)を参照。配送台帳・OHLCクラウド同期・日次退避・履歴グラフは未実装。
 
 採用初期案：Beta初期値100（`[model].initial_beta`で指定）、下限0、基準値不足の夜は倍率5と「基準値未確定」。連続観測の許容間隔2.5秒。確定したxは午前0時でも保持し翌04時に失効する。詳細な式を変更する場合は基本設計も更新する。
 
@@ -67,7 +67,7 @@ uv run --locked python -m resource_simulator run --db .secrets/worker.sqlite3 --
 
 段階2の配送台帳・退避後の再開・版1→2移行方法は[保存・移行設計0.1](docs/resource-simulator-storage-design.md)に具体化した。**保存設計だけを追加した当時はコードとDBスキーマは版1のままだった**。移行・送信・削除はまだ実装しておらず、既存DBのoutboxやOHLCを手動で削除してはいけない。配送台帳は未実装。現行版3からの将来の別移行で、ackedのoutbox削除、確認済み退避後の本体削除、欠落検出を同時に成立させる。
 
-## 既存DBの移行と公開切替（準備済み・本番未実行）
+## 既存DBの移行と公開切替（2026-10-23に運用適用済み）
 
 [保存・移行設計9章](docs/resource-simulator-storage-design.md)の保全・復旧・切替順序を読む。先に互換API/Webをデプロイして旧データのAlphaとBeta未提供表示を確認し、その後にWorkerを停止して移行する。運用反映が明示された場合だけ、対象の絶対DBパスを確認して以下を実行する。
 

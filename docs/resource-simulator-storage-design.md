@@ -1,6 +1,6 @@
 # 段階2のローカル保存・移行設計
 
-- 文書版：0.2／更新日：2026-10-22
+- 文書版：0.3／更新日：2026-10-23
 - 基準コミット：`cf351ea0808ac9c39b05ce83dd1507a845e455c7`
 - 上位文書：[要件定義書0.6](resource-simulator-requirements.md)、[基本設計書0.6](resource-simulator-basic-design.md)第5〜8章
 - 対応：D-01〜02、D-04〜06、D-09、F-04、AC-04、07、09〜10、12、14〜16
@@ -135,7 +135,9 @@ L + O == checkpoint.step - resource_starts.start_step
 - [SQLite Backup API](https://www.sqlite.org/backup.html)：整合したバックアップを別DBへ作る。
 - [SQLite WAL](https://www.sqlite.org/wal.html)：主DBとWALの関係、同一ホストでの運用。
 
-## 9. 現行：Alpha/Betaの版1→3移行と保存（実装済み・本番未適用）
+## 9. 現行：Alpha/Betaの版1→3移行と保存（2026-10-23運用適用済み）
+
+改訂0.3：明示承認により運用DBを移行し、新Workerの本番常駐と実通信照合を確認した。方式の変更なし。旧全行保持・新規backup・同一step比較の実測は[本番切替記録](alpha-beta-validation.md)を参照。第1〜8章の配送台帳案は未実装のまま。
 
 ### 9.1 版と識別の分離
 
@@ -166,9 +168,9 @@ Alphaは残存確定count＋分内count=step。Betaは同じ合計=step−start_
 
 移行時に選んだBeta初期値はresource_starts.initial_valueを正本とする。旧runの設定JSONにはBetaを追記しない。継続では保存済みAlpha規則・Beta量を優先し、係数変更等は従来どおり`--use-saved-rules`かnew-runを明示する。CLIのconfig_versionも実際に保存した旧hashを報告する。
 
-### 9.4 明示移行コマンド（将来の運用適用時）
+### 9.4 明示移行コマンド
 
-今回はテスト用DBだけで実行済み。以下は運用の切替が明示承認された後の手順であり、自動デプロイやWorker起動は行わない。
+2026-10-23に以下の手順で運用DBへ適用済み。以後も運用切替が明示承認された場合にだけ実施し、通常runで暗黙移行しない。
 
 1. 運用Workerと同期、状態確認等の接続を停止する。DBの絶対パス・旧コードSHA・configを確認し、元DBを削除しない。旧コードと設定も保全する。
 2. 新コードの固定依存を準備し、`uv run --locked python -m resource_simulator migrate --db <絶対DBパス> --config config/simulator.toml`。run/new-runと同じProcessLockを保持する。通常runは版1を拒否し、暗黙移行しない。
@@ -187,9 +189,9 @@ Alphaは残存確定count＋分内count=step。Betaは同じ合計=step−start_
 
 バックアップは元DBと同じローカルディスクのためディスク故障対策ではない。Windowsでの停電・実I/O故障・大量の運用DB容量/移行時間は未検証。
 
-### 9.6 公開切替順序（準備のみ）
+### 9.6 公開切替順序
 
-1. 今回の作業ブランチをレビューし、明示承認後に既存デプロイ元`codex/stage1-local-worker`へ取り込む。クリーン状態・origin一致を確認する既存deploy.pyのガードは維持する。本作業中はpush/merge/deployしない。
+1. 今回の作業ブランチをレビューし、明示承認後に既存デプロイ元`codex/stage1-local-worker`へ取り込む。クリーン状態・origin一致を確認する既存deploy.pyのガードは維持する。2026-10-23の承認済み切替ではfast-forwardによる取り込み・リモート反映・本番デプロイを実施した。今後も明示承認された切替作業で実施する。
 2. **互換APIとWebを先に**デプロイ。旧Worker・旧Table版1でAlphaが従来値、Betaが未提供となることを確認。旧WebはAlpha互換トップレベル項目で継続できる。新Webも旧API版1を読み取れる。
 3. Worker正常停止、バックアップと版1→3移行、ローカルstatusを確認して新Workerを開始。同期再開後にTable/APIの公開版2・単一resourcesペアとSQLiteの同じrun/step/計算日時を比較する。verify_azure.py --compare-onlyも両resourcesを比較する。
 4. 既取得Webの自動更新、下限表示、04/18境界、停止値/停滞・障害復帰、320px/PCでの2/1列を実運用側でも確認。ビルドSHAを記録。今回のローカル結果をAzure実機結果と読み替えない。
