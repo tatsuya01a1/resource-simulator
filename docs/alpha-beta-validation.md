@@ -1,6 +1,6 @@
 # Alpha/Beta追加の検証記録
 
-版：0.1／2026-10-22。対象：`codex/alpha-beta-resources`の本変更。
+版：0.2／2026-10-23。対象：`codex/alpha-beta-resources`の本変更。0.1のLinux結果を残し、末尾にWindowsリハーサルを追記。
 実装元：`origin/codex/stage1-local-worker`、開始時の最新SHA `576595fa8f67eec56a6ffd39ddcd51efafe524bb`。開始時の未コミット変更なし。fetch設定がmain限定だったため、リモートの全ブランチを読み取り確認して実装元refを明示fetchし、そこから作業ブランチを作成した。mainから実装を組み立てていない。
 
 ## 実装と採用初期案
@@ -57,3 +57,119 @@ Playwright管理ブラウザの取得先はネットワーク制限で403だっ�
 - 配送台帳、OHLCクラウド同期、日次Blob/退避、履歴グラフは対象外のまま。
 
 **運用Workerを停止/再起動せず、運用DBやAzureへ書き込んでいない。push・merge・本番デプロイは未実施。** 公開切替は保存設計9.6のAPI/Web先行→旧版互換確認→Worker停止/backup/移行→再開/比較の順で別途行う。
+
+## Windows実機リハーサル（2026-10-23追記）
+
+以下は0.1の未検証事項のうちWindowsローカル移行・再開を検証した記録。上記Linux結果と当時のpush未実施記録を変更しない。本番切替・Azure検証ではない。要件・数値モデル・実装コードの変更なし。
+
+### 環境・対象・隔離
+
+- 実行：**2026-10-23 15:27:23〜15:28:44 JST**（実時計のバックアップ・移行・70＋5ステップ・独立復元）。固定時計テストも同日のWindowsで実行。
+- OS：Microsoft Windows 11 Pro、10.0.26200、64bit。uv **0.13.4**、プロジェクト内CPython **3.13.16**（`.venv/Scripts/python.exe`、本体`.tools/python/cpython-3.13.16-windows-x86_64-none/python.exe`）。`uv sync --locked`成功。PATH・レジストリ・システムPythonを変更せず、依存更新なし。
+- 開始時ブランチ：`codex/stage1-local-worker`、HEAD `576595fa8f67eec56a6ffd39ddcd51efafe524bb`。未コミット変更なし。
+- `git fetch origin codex/alpha-beta-resources`後、レビュー済み`03d79e81b40e4828b2e094638451793146d610d2`からの後続コミット・差分なし。`git switch --track origin/codex/alpha-beta-resources`で切替。**使用SHAは`03d79e81b40e4828b2e094638451793146d610d2`**。uv.lockのSHA-256は`82335bf9d242ee896dd35b03d78f218c3d327a986895d41035879380c7f3c275`。
+- Win32_Processの起動引数と既存の起動補助コードを読み取り照合。実際の運用DBは`C:\Users\LovelyQte\Documents\resource-simulator\.secrets\worker.sqlite3`。既定パスからの推測ではない。運用プロセスPID **3084 / 1856**（Python起動プロセスと実体）は前後で同じ起動引数・PIDのまま稼働。`scripts/worker_control.py`は**一度も実行していない**。
+- 全成果物はGit除外の専用ディレクトリ`C:\Users\LovelyQte\Documents\resource-simulator\.cache\windows-rehearsal-20261023-152723`。以下ではこの絶対パスを`$trialRoot`と表記。運用ディレクトリと分離し、一意な新規ディレクトリ・排他的作成・存在確認により既存ファイルを上書きしていない。
+- 運用DBへの接続はSQLite URI `mode=ro`のBackup API取得のみ。元DBのjournal_mode等を設定せず、運用DBへのSQL書込・移行・削除・差替えなし。運用Workerの停止・再起動・設定変更なし。本試験からAzure送信・設定変更・デプロイなし（元から稼働中の運用Workerの通常同期は継続）。main・デプロイ元へのmergeなし。
+
+### 実施コマンドと取得方法
+
+初期確認は`git status --short`、`git branch --show-current`、`git rev-parse HEAD`、`git log --oneline <レビューSHA>..origin/codex/alpha-beta-resources`、`git diff --stat <レビューSHA> origin/codex/alpha-beta-resources`、`uv --version`、`.venv/Scripts/python.exe --version`。OSと起動引数は`Get-CimInstance Win32_OperatingSystem`と`Get-CimInstance Win32_Process`で確認した。
+
+検証用ローカルスクリプトを`uv run --locked python .cache/rehearse_windows.py`で実行した。スクリプト自体もGit除外で保持し、SHA-256は`f75d2d41b5bd6eedacb4af57691dad675ff34706d3f611164502576ee6fa91fe`。DB・manifest・全ステップ記録・ログを公開リポジトリへ含めない。
+
+取得・復元で実行した処理は以下（`source`は上記の確認済み絶対パス、`backup`等は`$trialRoot`下の絶対Path）。本番停止は不要で、元DBは読み取り専用のまま取得した。
+
+```python
+with backup.open("xb"):
+    pass
+with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as src:
+    with closing(sqlite3.connect(backup)) as dst:
+        src.backup(dst, pages=256, sleep=.05)
+        dst.execute("PRAGMA journal_mode=DELETE")  # バックアップ先だけ
+# backupを閉じてreadonly再接続し、版・物理/FK・全run論理検査・fingerprintを保存
+assert not trial.exists()
+shutil.copyfile(backup, trial)  # 検証済み単体バックアップから新規パスへ
+assert sha256(trial) == sha256(backup)
+# 全リハーサル後、元の版1バックアップをさらに新規の独立復旧先へ
+assert not recovery.exists()
+shutil.copyfile(backup, recovery)
+```
+
+WAL稼働中の主DBだけのコピーは行っていない。復元先には既存DB/WAL/SHMなし。試験Workerは次の既存CLIを、`sys.executable`（固定Python）から**独立子プロセス**として実行した。`--cloud-config`なし。起動は`subprocess.Popen(..., creationflags=subprocess.CREATE_NO_WINDOW)`、自分で起動したPIDを`poll()`で監視し、強制停止は行っていない。
+
+```powershell
+$trialRoot = 'C:\Users\LovelyQte\Documents\resource-simulator\.cache\windows-rehearsal-20261023-152723'
+$trialDb = Join-Path $trialRoot 'trial.sqlite3'
+uv run --locked python -m resource_simulator migrate --db $trialDb --config config/simulator.toml
+uv run --locked python -m resource_simulator migrate --db $trialDb
+uv run --locked python -m resource_simulator run --db $trialDb --steps 70
+# 終了コード0・プロセス終了・保存状態を確認し、別の新規パスへBackup APIで停止状態を保存
+# 4秒待機しDBの状態が変化しないことを照合後、別プロセスで再開
+uv run --locked python -m resource_simulator run --db $trialDb --steps 5
+uv run --locked python -m unittest discover -s tests -v
+git diff --check
+```
+
+### 固定したバックアップと移行・復旧（AC-04/14/15/23/24）
+
+運用DBの後刻の状態は比較基準に使わず、最初の整合した`verified-v1.sqlite3`を固定基準にした。全run（実データは1 run）について既存`validate_all(legacy=True)`で設定hash、checkpoint、分内/確定OHLC、outboxの対応を検査。物理整合性`ok`、foreign_key_checkは0件、DB版1。移行前後・移行処理のバックアップ・独立復元でも同じ検査に合格。
+
+| 旧テーブル | バックアップ件数 | 版3移行直後 | 独立版1復元 |
+| --- | ---: | ---: | ---: |
+| simulation_runs | 1 | 1 | 1 |
+| active_run | 1 | 1 | 1 |
+| checkpoints | 1 | 1 | 1 |
+| open_candles | 1 | 1 | 1 |
+| candles | 1433 | 1433 | 1433 |
+| outbox | 1433 | 1433 | 1433 |
+
+- 旧6テーブルの`SELECT rowid,* ORDER BY rowid`の全行を直接比較し完全一致。既存`migration.fingerprint()`の論理SHA-256も全比較先で`d9faae67bd6052d007ed16d341c093111516a30da67f7259c999b4d1c790a4cc`と一致。JSONの元文字列・設定hash・outboxのattempts/next_attempt_atを含む。
+- active run：`ac23fe78-636c-40ba-ab6d-bef83f17c26f`、世代1、Alpha step **85960**、値 **672.0068116941972**、計算日時`2026-10-23T06:27:22.671877+00:00`。run/世代/step/値/日時は移行直後も一致。
+- 設定JSONは旧6キーのまま。config_version=`c693897acb23dfd3ba0cd5bf3a5f1b2c02dfe1bae719bfeb6c062403a5895be6`、rules_hash=`4cbecdf143cc115abd8b652c773aa3bee68c7b6f56aed68a7b5e7ae9067e37a1`を保持。
+- 元の検証済みバックアップfile SHA-256：`7f4fb06084680a88086709ae66383842fe048a918d15f392842c6a6b0d7f205a`。移行前のtrialコピーも一致。
+- 版3移行でBeta初期値**100**、start_step=**85960**、step/timeはAlphaと一致。Beta確定足0・分内足0で、追加前履歴なし。追加したAlpha開始位置は0。DB版3の全run・物理/FK検査成功。
+- 移行処理自身のバックアップ：`trial.sqlite3.v1-backup-9b7de2f2d4ea489c8fa448f272df391b.sqlite3`。manifestのverified=true、source_schema=1、target_schema=3、件数・論理hash一致。file SHA-256=`50bf1699ad950a170b94a11d572a87283dc99079c68bdf46f8edd75e1912c698`をmanifestと再照合。外側のバックアップと物理hashが異なっても、論理全行・版・整合性は一致している。
+- 同一trial DBへmigrateを再実行し`already_migrated=true`。旧全行・Beta状態・開始位置不変、Beta重複なし、manifestは1件のまま。
+- 最後に元の`verified-v1.sqlite3`を**`independent-recovery-v1.sqlite3`へ独立復元**。file SHA-256は元と完全一致、旧全行/rowid・論理fingerprintも一致し、版1・全run・integrity/FK検査成功。進行済みtrial DBは上書きしていない。これは移行前の状態の復元であり、**移行後75ステップを保持して版1に戻せることを意味しない**。
+
+### 実時計の再開・正常停止・再起動（AC-04/08/09/14/21/24、NF-02）
+
+S=85960、最初のN=70、再起動N=5。保存DBを読み取り専用トランザクションで約25ms間隔で観測し、欠落のない**75件の連続したstep**を取得。全件でAlpha/Betaのstep・計算日時一致、`Beta要求量=同stepのAlpha実増減量×倍率`、`Beta値=max(0,前Beta値+要求量)`、実増減量を照合した。乱数は固定していない。
+
+| 時点（JST） | 共通step | Alpha | Beta | Beta開始step |
+| --- | ---: | ---: | ---: | ---: |
+| 移行直後（15:27:23） | 85960 | 672.0068116941972 | 100 | 85960 |
+| 70ステップ正常停止（15:28:34） | 86030 | 687.8462182647313 | 179.19703285267076 | 85960 |
+| 別プロセス5ステップ正常停止（15:28:44） | 86035 | 681.183176371926 | 145.88182338864442 | 85960 |
+
+- 最初の観測は15:27:25.807910、15:28の分境界を通過。70ステップ後の保存状態は`stopped-after70.sqlite3`へBackup APIで保全。子プロセス終了を確認し4秒待機して状態不変を確認。次の起動ログは保存step86030を報告し、次観測は15:28:40.177025。停止中の追いつき計算なく追加5ステップだけ進行した。
+- 新規子プロセスPID：70ステップ **24212**、5ステップ **4664**。両方終了コード**0**、`poll()`で終了確認、終了後のWin32_Process列挙でも試験Workerなし。stdoutは各起動時に保存run/step/config hashを報告。stderrは両方空、worker.logは初期化・正常停止4行のみ、WARNING/ERROR/Tracebackなし。
+- Beta開始位置とresource_startsの初期値は移行時のまま。再起動前後で基準値・倍率・対象日・有効期間・取得状態も一致。実時計では昼の倍率5・pending、04/18基準値と確定倍率/有効期間はnull。未取得の境界値を補っていない。**確定した夜間倍率の復元は下記固定時計テストによる確認**。
+- 最後の両計算日時は`2026-10-23T06:28:44.176952+00:00`。Alphaサンプル合計**86035=step**、Beta合計**75=86035−85960**。Alpha確定1434＋分内40サンプル、Beta確定1（35サンプル）＋分内40サンプル。確定足とoutboxはAlpha各1434件、Beta各1件。最後の全run/物理/FK検査成功。
+- 実時計ではAlpha最小658.3645826741982、Beta最小31.78885490000539で、0への到達はなかった。全観測で下限を含む式を照合したが、**下限での切捨ての発生確認は固定入力テスト**で行った。
+
+### Windows固定時計・一時DBの境界/失敗試験
+
+`uv run --locked python -m unittest discover -s tests -v`：**65件成功、失敗0、skip0、6.703秒**。一時DBは`.cache/tests`配下。全ログはGit除外`.cache/windows-alpha-beta-tests.log`（SHA-256 `47900f9dadb6d2ac4365f2a53e866d7946af04e4e60f81e6671d0d0c2c21c533`）。Azureはテストダブルであり、実通信ではない。
+
+| 対応AC | Windowsで成功した既存テストと意味 |
+| --- | --- |
+| AC-03/21 | `test_day_five_times_actual_alpha_delta_and_both_lower_bounds`：Alpha実量使用とAlpha/Beta両下限0。`test_absolute_night_difference_is_fixed_and_zero_is_stationary`：差の絶対値、差0、午前0時で倍率保持 |
+| AC-22 | `test_exact_and_inexact_boundaries_take_pre_step_value`、`test_evening_crossing_applies_new_x_on_same_step`：04/18時と+0.4秒で直前コミット値を取得、18時同stepからx、翌04時で失効 |
+| AC-22 | `test_gap_allowance_and_restart_are_distinct_from_crossing`：2.5秒は連続、2.500001秒は欠測、再起動直後は1秒でも非連続。`test_restart_on_boundary_never_acquires_or_repeats_it`：再起動で境界を補わず二重取得なし |
+| AC-04/14/22 | `test_restored_night_retains_x_until_dawn_but_not_next_evening`：保存した確定倍率を午前0時後の再起動でも保持し、期限外は流用しない。`test_evening_without_morning_is_unconfirmed_not_zero`：夜の欠測は倍率5・missing・null |
+| AC-15/24 | `test_baselines_and_two_candles_roll_back_together`、`test_atomic_failure_when_beta_outbox_write_fails`：両リソース・基準値・OHLC・outboxの一括ROLLBACK |
+| AC-15/23 | `test_failure_at_each_migration_phase_preserves_original_schema_and_data`：backup後・DDL・Beta追加・検査・版更新で例外を注入し版1全行保全。`test_kill_during_migration_recovers_v1_and_verified_backup`：COMMIT前の自分の子プロセスkillから版1・検証済みbackupを回復 |
+| AC-04/15/24 | `test_ac04_kill_during_transaction_restores_all_committed_state`：実SQLite保存トランザクション中の強制終了・再開。`test_corruption_in_beta_history_and_inactive_run_is_rejected`：inactive runも検査 |
+| NF-02 | 既存の4周期テストと`test_sleep_across_boundary_does_one_step_and_has_no_baseline`：保存遅延・スリープ後の追いつきなし |
+
+固定時計試験でWindowsの実時計は変更していない。04/18時まで待った実時間試験・OS休止・停電・物理I/O故障の試験とは区別する。
+
+### 失敗・制約と切替判断
+
+初回のOS/プロセス読取り、運用DB読取り、ブランチ切替はサンドボックス権限で拒否された。承認後、同じ読取り・指定ブランチ切替・隔離試験を実行して成功した。初回DB読取りはファイル存在確認の段階で失敗し、運用DBへの接続や変更は発生していない。失敗試行の専用ディレクトリも上書きせず残した。試験コード不具合・移行不整合・Workerエラーは見つからず、実装修正は不要だった。
+
+**Windowsのローカル移行・再開に関する阻害事項は今回の範囲で認められず、別途承認された本番切替の準備へ進める。** ただし互換API/Webの先行公開と旧版互換確認、運用停止/新規backup/移行後のAzure実通信・公開版2比較は未実施で、保存設計9.6の本番切替作業で必要。実スマートフォン・OSスリープ/停電/実I/O障害・費用実測も未検証。OHLCクラウド同期・日次退避・履歴UIを含むMVP全体の完成ではない。
+
+本追記は作業ブランチだけにコミット・pushする。運用Worker操作・運用DB書込・本試験からのAzure送信・本番デプロイ・main/デプロイ元へのmergeは実行していない。
