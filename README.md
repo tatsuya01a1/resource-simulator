@@ -19,12 +19,16 @@
 ## Codexへの入口
 
 1. [AGENTS.md](AGENTS.md)を読む。
-2. [ドキュメント案内](docs/README.md)から[要件定義書0.6](docs/resource-simulator-requirements.md)と[基本設計書0.6](docs/resource-simulator-basic-design.md)を読む。MVP要件と既存ACを維持し、最新値の先行公開を追記した。
+2. [ドキュメント案内](docs/README.md)から[要件定義書0.7](docs/resource-simulator-requirements.md)と[基本設計書0.7](docs/resource-simulator-basic-design.md)を読む。MVP要件と既存ACを維持し、最新値の先行公開を追記した。
 3. 基本設計書第13章の段階に沿って実装し、要件定義書第8章の受入条件で検証する。
 
 要件定義書を優先し、初期案と確定要件を区別する。数値モデル・API等の詳細は各文書を正本とし、このREADMEに複製しない。
 
 ## 現在の状態
+
+履歴版は`codex/ohlc-history`で実装・ローカル検証、**本番未適用**。保存済み確定OHLCの非公開Table配送/再送、`/api/ohlc`、JSTローソク足と当日/週/月/暦3か月を追加し、グラフ中心のカードへ変更した。DBは版3のままで移行不要。元OHLC/outboxは削除せず、配送確認用の補助SQLiteを別に作る。[履歴検証記録](docs/history-validation.md)と[適用・復旧手順](docs/history-operations.md)を参照。APIには履歴専用read SASが必要。日次Blob・圧縮退避・配送台帳/pruneは後続で、MVP全体の完成ではない。
+
+以下は現在の本番Alpha/Beta版と従来手順の記録。新履歴版の公開記録とは区別する。最新仕様は要件/基本設計0.7、保存設計0.4。
 
 2026-10-23にAlpha/Beta版を本番公開し、運用Workerを常駐稼働中。計算・原子的保存・最新値公開版2・レスポンシブカードをWindowsとAzure実通信で確認済み。Alphaは旧内部ID `resource` と値・履歴を引き継ぐ。Betaは同じstepのAlpha実増減量に連動する。時間帯の規則は[基本設計4.1章](docs/resource-simulator-basic-design.md)、移行と切替・復旧は[保存・移行設計9章](docs/resource-simulator-storage-design.md)、テスト結果は[Alpha/Beta検証記録](docs/alpha-beta-validation.md)。
 

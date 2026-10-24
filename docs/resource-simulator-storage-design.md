@@ -1,11 +1,13 @@
 # 段階2のローカル保存・移行設計
 
-- 文書版：0.3／更新日：2026-10-23
+- 文書版：0.4／更新日：2026-10-23
 - 基準コミット：`cf351ea0808ac9c39b05ce83dd1507a845e455c7`
 - 上位文書：[要件定義書0.6](resource-simulator-requirements.md)、[基本設計書0.6](resource-simulator-basic-design.md)第5〜8章
 - 対応：D-01〜02、D-04〜06、D-09、F-04、AC-04、07、09〜10、12、14〜16
 - 状態：**現行実装はAlpha/BetaのDB版3。版1→3の保全付き移行を第9章に記載。第1〜8章は配送台帳の旧版2案（未実装・適用禁止）として残す。OHLC送信・削除・日次退避は未実装。**
 - 改訂0.2：Beta追加とリソース別開始step、旧設定hash保持、原子的保存、明示移行、公開切替/復旧を追加。旧版2案の実装完了を意味しない。将来の配送台帳は版3からの新しいDB版・移行設計を必要とする。
+
+**改訂0.4**：今回のOHLC配送/履歴表示は下記10章。上記のOHLC送信未実装は0.3時点の記録。運用DBは版3を維持し、旧版2案の台帳・削除・日次退避は今回も実装しない。本番適用は別途指示後。
 
 ## 1. 保存するものと責務
 
@@ -196,3 +198,21 @@ Alphaは残存確定count＋分内count=step。Betaは同じ合計=step−start_
 3. Worker正常停止、バックアップと版1→3移行、ローカルstatusを確認して新Workerを開始。同期再開後にTable/APIの公開版2・単一resourcesペアとSQLiteの同じrun/step/計算日時を比較する。verify_azure.py --compare-onlyも両resourcesを比較する。
 4. 既取得Webの自動更新、下限表示、04/18境界、停止値/停滞・障害復帰、320px/PCでの2/1列を実運用側でも確認。ビルドSHAを記録。今回のローカル結果をAzure実機結果と読み替えない。
 5. 新Workerから版2を送る前に旧APIを更新しておく。版2取得後は同期・Webとも版の後退を受け入れない。同run/同stepの移行checkpointは再公開しないため、最初の正常な次ステップからペアが公開される。1つのEntityとETagで片方だけの公開を防ぐ。
+
+## 10. 版3を保持した履歴配送（0.4現行）
+
+### 10.1 原本を変更しない配送確認
+
+`<絶対DBパス>.history-delivery.sqlite3`を同期スレッドで新規作成する。`receipts(target,run,resource,minute,hash)`、主キーは先頭4列。targetはSDK client.url（endpoint/table）と設定partitionのSHA-256、hashは正規化済み公開OHLCのSHA-256。sourceは同じ絶対DBパスをmode=roで開き、版3を確認し、配送DBをreadonly ATTACHしてoutbox JOIN candlesからreceiptのない行だけ最大100件読む。source接続を閉じてからネットワーク送信・読戻しを行い、成功した足のreceiptをFULL同期SQLiteトランザクションで保存する。全接続は明示closeする。
+
+計算DBのDDL/user_version/checkpoint/既存行/rowid/設定/outbox再試行情報は変更しない。全足にoutboxが必要という版3の復元不変条件は維持。statusのpending_ohlcは従来どおりoutbox総数であり「配送未確認件数」ではない。receiptとの差分が実配送残件。別DBのため同時原子性を主張せず、配送確認が欠けた時は安全な再送で解決する。sourceを削除する判断には一切使用しない。
+
+### 10.2 失敗・復旧・切替
+
+- sourceは復旧の正本、receiptは再送省略の補助。receiptなし/応答不明/COMMIT前終了は同じクラウドキーで再送・読戻し。一致しないクラウド値は書換えず停止/再試行する。ネットワーク障害は計算を止めない。
+- receipt DBを紛失した場合は全outboxを再走査し既存足を照合する。破損時は計算を継続し同期のエラーを記録。停止後に壊れたreceipt DBを別名で保全し、新規補助DBで再配送する（sourceは削除/移行しない）。別クラウドへ向けた場合はtargetが異なるため古いreceiptを流用しない。
+- receiptには履歴削除後のsample累積/step範囲/退避manifestがない。旧版2のcandle_ledgerと同等ではなく、版3からのpruneは許可しない。日次Blob/圧縮退避照合/ローカルおよびTable削除は別移行で対応する。
+- 今回、版3運用DBの移行は**不要**。既存バックアップ手順と全runの整合性検査は適用時にも行い、運用Workerを止めて固定コードを切替える。過去の版1→3移行をもう一度行わない。元のrun/世代/step/Beta開始位置を維持する。
+- 新Workerを止め旧リリースコードへ戻しても、計算DBは版3のままで互換性を維持する。補助DBを旧コードは参照せず、同期済みTableは残して閲覧可能。進行したsourceを古いバックアップで上書きしない。
+
+通常3か月はTableから読めるので日次化未実装でも履歴閲覧は成立する。ただし退避要件D-09/C-11と容量抑制は残作業。全データを保持し続ける間のディスク容量/起動検査時間を監視する。適用手順は[履歴運用手順](history-operations.md)、実施範囲は[検証記録](history-validation.md)。

@@ -83,7 +83,7 @@ try {
     calculated_at: new Date().toISOString(), published_at: new Date().toISOString(), api_time: new Date().toISOString() };
   await page.getByRole('status').filter({ hasText: '公開状態を受信中' }).waitFor();
   checks.push('stall, pending baseline, failed fetch retains both values, automatic recovery');
-  assert.equal(await page.getByRole('button').count(), 0);
+  assert.equal(await page.getByRole('button').filter({ hasText: /開始|停止|リセット/ }).count(), 0);
   await mkdir(path.join(root, '.cache/validation'), { recursive: true });
   for (const width of [1280, 320]) {
     await page.setViewportSize({ width, height: 900 });

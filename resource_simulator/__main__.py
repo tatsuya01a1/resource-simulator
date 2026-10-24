@@ -84,12 +84,17 @@ def main(argv=None) -> int:
                     for signum in (signal.SIGINT, signal.SIGTERM):
                         previous_handlers[signum] = signal.signal(signum, lambda *_: stop.set())
                     sync = None
+                    history_sync = None
                     if args.cloud_config:
                         from .cloud import LatestSync, configured_publisher
                         # Credential/network failures remain in the IO thread.
                         try:
                             sync = LatestSync(args.db, configured_publisher(args.cloud_config))
                             sync.start()
+                            from .history_sync import HistorySync
+                            # Separate client and thread: history backlog cannot block latest values.
+                            history_sync = HistorySync(args.db, configured_publisher(args.cloud_config))
+                            history_sync.start()
                         except Exception as exc:
                             logging.warning("latest_sync_configuration_failed type=%s", type(exc).__name__)
                     try:
@@ -98,6 +103,8 @@ def main(argv=None) -> int:
                         stop.set()
                         if sync:
                             sync.close()
+                        if history_sync:
+                            history_sync.close()
         return 0
     except (OSError, sqlite3.Error, ValueError, AlreadyRunning, KeyError, TypeError) as exc:
         if handler:

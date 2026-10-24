@@ -1,5 +1,7 @@
 # Codex 作業指針
 
+2026-10-23履歴版：基本設計16章・保存設計10章・docs/history-validation.md・docs/history-operations.mdを参照。DB3を維持してOHLC配送/API/グラフを実装。本番は従来Alpha/Beta版、今回の適用は別途指示後。旧DB版2台帳・日次Blob・退避・削除は未実装のまま。
+
 ## 最初に読む文書
 
 1. [README.md](README.md)：PJの目的と現在の状態。
