@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-from azure.core.exceptions import ResourceExistsError
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from api.history_contract import candle, instant, months_before, partition, stamp
 from api.history_service import aggregate, OutsideHistory, read_history
 from resource_simulator.history_sync import HistorySync
@@ -36,6 +36,8 @@ class HistoryTable:
     def get_entity(self, pk, rk):
         if self.failed:
             raise ConnectionError('offline')
+        if (pk, rk) not in self.entities:
+            raise ResourceNotFoundError()
         return deepcopy(self.entities[pk, rk])
 
     def upsert_entity(self, value, **kwargs):
@@ -44,10 +46,24 @@ class HistoryTable:
         self.entities[value['PartitionKey'], value['RowKey']] = deepcopy(value)
 
     def query_entities(self, query, *, parameters, **kwargs):
+        if self.failed:
+            raise ConnectionError('offline')
         p = parameters
         return iter(deepcopy([value for (pk, rk), value in sorted(self.entities.items())
                              if pk == p['pk'] and p['start'] <= rk < p['end']
                              and ('after' not in p or rk > p['after'])]))
+
+    def submit_transaction(self, operations):
+        operations = list(operations)
+        if any(item[0] == 'create' and (item[1]['PartitionKey'], item[1]['RowKey']) in self.entities for item in operations):
+            error = ResourceExistsError(); error.status_code = 409; raise error
+        for item in operations:
+            operation, value = item[:2]
+            if operation == 'create': self.create_entity(value)
+            else:
+                if not value['RowKey'].startswith('day|'):
+                    raise AssertionError('history must never upsert original candles')
+                self.upsert_entity(value)
 
 
 class HistoryTests(WorkspaceTest):

@@ -1,5 +1,7 @@
 # 履歴表示の適用・復旧手順
 
+版0.2更新（2026-10-26）：分離したAzure検証・版3旧→新→旧Workerのリハーサルを実施済み。結果は[Azure最終検証](history-azure-validation.md)。**本番操作は未実施**。以下0.1の「未検証」は当時の記録とし、今回の現行差分を末尾に追記する。
+
 版0.1、2026-10-23〜24（更新2026-10-24）。**準備のみ。今回この手順の本番操作は実行していない。** 最新リリース記録は[Alpha/Beta本番切替](alpha-beta-validation.md)。実装起点は同じコードを含む`514e700`、公開/稼働コードSHAは`547adcb`。今回の検証は[履歴検証記録](history-validation.md)。
 
 ## 適用前
@@ -46,3 +48,17 @@ uv run --locked python scripts/deploy.py
 ## 残る運用整備
 
 日次Blob・圧縮退避・照合manifest・版3からの配送台帳移行・安全なprune/ローカル容量抑制は未実装。保持中の原本を削除しないため通常3か月閲覧は成立するが、長期容量/起動時間の監視が必要。SAS更新、料金/長期負荷、Azure実通信、大量追送時間、停電/実I/O障害、実スマートフォンは今回未確認。
+
+## 0.2の適用時の変更点
+
+1. レビュー対象は最新`codex/ohlc-history`。公開時点のAPI/Web実装は検証SHA9da6157と同一で、Worker配送の最新修正は実Azureで確認済み。今回、Windows Gitの認証不能を接続済みGitHubで補い、内容tree一致を検査して公開している。元ローカル履歴は保全ブランチに残す。本番への取り込みは別途指示後。
+2. current限定SASは変更せず、HISTORY_READ_SASをread/HTTPS/`ohlc|`〜`ohlc|~`の範囲で追加する。検証SASは7日、本番準備スクリプトの初期案は90日。SAS失効・更新予定を運用記録へ残す。settingsは切替直前のAzure設定を秘密を出さずに取得し、最新値を保持して履歴項目だけを追加する。古いローカルsettingsファイルで本番の別設定を上書きしない。
+3. 本番deploy.pyのclean/ブランチ/origin一致ガードを維持。API/Webを先に更新し、旧Workerの最新値継続と、履歴未作成を0で捏造しないことを確認する。最終build SHAと配布JS/CSSのhashを記録する。
+4. 本番Worker正常停止→同じProcessLockの解放→SQLite Backup APIの新規backup→別接続で全run/integrity/FK/rowid込みhash照合。DBは版3維持、migrate/new-runは不要。稼働中DBはBackup APIコピーか単一read transactionで検査し、非transactionの複数読取りを混ぜない。
+5. 同じ絶対source DBと設定で新Workerを起動。新しい`receipts_v2`はowner/target/raw_hashを検査し、旧receiptsを信用せず必要な全件を再照合する。新しい分から最大1000件、99原本＋通知1行の原子的Table transaction。原本はcreateのみ。source/outbox件数は減らない。status.pending_ohlcは保持outbox総数のままであり、送信待ち件数と混同しない。
+6. 既存の同run/世代・次stepからの再開、Beta開始位置、分内状態、既存OHLC/outbox不変を確認。SQLite→Table→実APIのOHLC/count/観測日時を照合し、3か月のcursor全件確認と各幅の画面を記録する。初回追送中と同期完了後を区別する。最新値1秒・履歴60秒の更新は独立して確認する。
+7. 失敗時は新Workerを正常停止し、進んだ版3DBを保全して、検証済み旧コード547adcbを同じDBで再開できる。検証ではboot step/同run世代/全原本を保持し、進捗喪失0だった。旧Workerは最新値だけを同期するため履歴配送は止まる。任意の古い版や版1へ戻せるとは記載しない。
+8. sourceの古いバックアップ復元は最後の保存位置までの復旧であり、復元後に進捗を失う。原則同じDBで前進復旧。破損等で復元が必要な時はsource/WAL/SHMを保全し、hash検証済みbackupを**別パス**へ独立復元・全検査してから明示切替する。クラウドの新しい世代/stepを消して上書きしない。検証では古いbackupの復元自体は成功し、現行に置換すると6,723step失うことを確認した。
+9. receiptだけの破損/欠落/ロックは計算継続・同期失敗として記録する。正常停止後に補助DBを別名で保全し、新規作成して元全件から再照合する。別source/別targetのreceiptは流用しない。クラウドを削除/復元した時もreceiptを保全再作成して全照合する。元OHLC/outboxは消さない。
+
+検証専用RG/SWA/Storage/Entra appはレビュー用に残す。検証Workerは停止して最終値・履歴を保持する。実スマートフォン、月次実請求、停電/実I/O故障は未検証のまま。日次Blob/退避/pruneは本番適用前に誤って有効化しない。容量・要求/帯域・SAS期限を監視し、月1,500円の目標と3,000円の許容を区別する。

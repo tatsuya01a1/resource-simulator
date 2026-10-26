@@ -1,6 +1,8 @@
 # ドキュメント案内
 
-更新日：2026-10-23。
+更新日：2026-10-26。
+
+2026-10-26更新：[Azure最終検証・切替リハーサル](history-azure-validation.md)を追加。要件/基本設計0.8（基本設計17章）・保存設計0.5（11章）・運用手順0.2が最新。分離した検証環境へ反映済み、本番は未適用。旧記録は当時の状態として残す。
 
 履歴版（今回）は**本番未適用**。[履歴検証記録](history-validation.md)、[適用・復旧手順](history-operations.md)を追加。要件/基本設計0.7・保存設計0.4が最新。基本設計16章/保存設計10章を履歴経路の正本とし、旧節の未実装記述は当時の状態として扱う。DB3維持、OHLC配送/API/ローソク足は実装、日次Blob/圧縮退避/台帳/pruneは後続。
 
@@ -8,11 +10,11 @@
 
 | 順序 | 文書 | 版 | 役割 |
 | --- | --- | --- | --- |
-| 1 | [要件定義書](resource-simulator-requirements.md) | 0.7 | 履歴ローソク足とAC-27〜31、既存AC維持 |
-| 2 | [基本設計書](resource-simulator-basic-design.md) | 0.7 | 16章に履歴API/暦境界/集約/UI |
+| 1 | [要件定義書](resource-simulator-requirements.md) | 0.8 | 履歴と実通信/障害/切替の最終検証範囲 |
+| 2 | [基本設計書](resource-simulator-basic-design.md) | 0.8 | 16/17章に履歴API/日別差分/原子的配送 |
 | 3 | [Codex作業指針](../AGENTS.md) | — | 文書の扱い、実装範囲、進め方と検証の記録 |
 | 4 | [段階1検証記録](stage1-validation.md) | 2 | 実行環境、AC別テスト結果、レビュー修正32テスト、未検証事項 |
-| 5 | [段階2の保存・移行設計](resource-simulator-storage-design.md) | 0.4 | 10章にDB3維持の配送確認。旧配送台帳案は未実装 |
+| 5 | [段階2の保存・移行設計](resource-simulator-storage-design.md) | 0.5 | 10/11章にDB3維持の配送確認v2。台帳/pruneは後続 |
 | 6 | [最新値公開の構築・運用](azure-latest-values.md) | 0.4 | 既存AzureへのAlpha/Beta本番公開と切替手順 |
 | 7 | [最新値公開の検証記録](latest-values-validation.md) | 0.3 | 旧Azure結果と今回のローカル検証の区別 |
 | 8 | [Alpha/Beta検証記録](alpha-beta-validation.md) | 0.3 | Linux・Windowsリハーサルと本番切替、SQLite/Table/API実通信・公開画面の確認 |

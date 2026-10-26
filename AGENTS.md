@@ -1,5 +1,7 @@
 # Codex 作業指針
 
+2026-10-26更新：履歴の実Azure最終検証はdocs/history-azure-validation.md、現行の差分取得/原子的通知は基本設計17章、配送確認v2は保存設計11章。検証専用AzureとWorkerだけに適用し、本番切替は別途指示後。元OHLC/outboxの削除は引き続き禁止。
+
 2026-10-23履歴版：基本設計16章・保存設計10章・docs/history-validation.md・docs/history-operations.mdを参照。DB3を維持してOHLC配送/API/グラフを実装。本番は従来Alpha/Beta版、今回の適用は別途指示後。旧DB版2台帳・日次Blob・退避・削除は未実装のまま。
 
 ## 最初に読む文書

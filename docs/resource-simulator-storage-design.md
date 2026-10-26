@@ -1,6 +1,6 @@
 # 段階2のローカル保存・移行設計
 
-- 文書版：0.4／更新日：2026-10-23
+- 文書版：0.5／更新日：2026-10-26
 - 基準コミット：`cf351ea0808ac9c39b05ce83dd1507a845e455c7`
 - 上位文書：[要件定義書0.6](resource-simulator-requirements.md)、[基本設計書0.6](resource-simulator-basic-design.md)第5〜8章
 - 対応：D-01〜02、D-04〜06、D-09、F-04、AC-04、07、09〜10、12、14〜16
@@ -201,6 +201,8 @@ Alphaは残存確定count＋分内count=step。Betaは同じ合計=step−start_
 
 ## 10. 版3を保持した履歴配送（0.4現行）
 
+0.5更新：補助DBの現行形式は11章。旧5列receiptsは保全するが送信省略には使わない。計算DBは版3のまま。
+
 ### 10.1 原本を変更しない配送確認
 
 `<絶対DBパス>.history-delivery.sqlite3`を同期スレッドで新規作成する。`receipts(target,run,resource,minute,hash)`、主キーは先頭4列。targetはSDK client.url（endpoint/table）と設定partitionのSHA-256、hashは正規化済み公開OHLCのSHA-256。sourceは同じ絶対DBパスをmode=roで開き、版3を確認し、配送DBをreadonly ATTACHしてoutbox JOIN candlesからreceiptのない行だけ最大100件読む。source接続を閉じてからネットワーク送信・読戻しを行い、成功した足のreceiptをFULL同期SQLiteトランザクションで保存する。全接続は明示closeする。
@@ -216,3 +218,15 @@ Alphaは残存確定count＋分内count=step。Betaは同じ合計=step−start_
 - 新Workerを止め旧リリースコードへ戻しても、計算DBは版3のままで互換性を維持する。補助DBを旧コードは参照せず、同期済みTableは残して閲覧可能。進行したsourceを古いバックアップで上書きしない。
 
 通常3か月はTableから読めるので日次化未実装でも履歴閲覧は成立する。ただし退避要件D-09/C-11と容量抑制は残作業。全データを保持し続ける間のディスク容量/起動検査時間を監視する。適用手順は[履歴運用手順](history-operations.md)、実施範囲は[検証記録](history-validation.md)。
+
+## 11. 配送確認DBの障害・復元対応（0.5現行）
+
+`receipts_v2`はowner/target/run/resource/minuteを複合主キーとし、公開payload hashと元JSON raw_hashを保持する。sourceをmode=ro、補助DBも読み取り時はreadonly ATTACHとし、元JSONのSHA-256が一致する記録だけで再送を省略する。ownerは絶対DBパス、targetは送り先を区別する。別パスのクローンでは同runでも再送して確認する。同じパスに別内容を復元した場合もraw_hash差を検出し、異なるクラウド足を上書きしない。
+
+クラウド送信と日別通知は原子的なTable transaction。読戻し照合→必要な旧通知更新→補助DBのFULL同期transactionの順でreceiptを保存する。途中kill/ロック/保存失敗では未確認行を残し、再起動で再送する。補助DBはquick_checkと実クエリで検査し、破損/利用不能を正常な「全件送信済み」とみなさない。検査が通っても意図的な改変を防ぐセキュリティ境界とは扱わない。
+
+復旧はWorker停止→sourceの整合Backup API取得・全run検査→補助DB一式を別名で保全→同じsourceと送り先で新規補助DB作成・全件照合。補助DBのバックアップを別DB/別パスに置いた場合はownerで弾く。元sourceが同一内容なら記録の再利用は可能だが、クラウドを再作成/消去/古い状態へ復元した場合は必ず補助DBも保全再作成し、全原本を照合する。source/candles/outboxを消して復旧しない。
+
+稼働中sourceの検査は、単純ファイルコピーや複数の非transaction SELECTではなく、Backup APIの整合コピーまたは単一読取transaction上で実施する。旧Workerへの復帰は検証SHA547adcb・同じ版3DBで実確認済み。旧コードは補助DBを使わず最新値だけを同期する。古いsourceバックアップを現在のsourceへ戻すと進捗を失うため、同じ版3DBの前進復旧を優先する。
+
+実測例：222,286足のsource約185.2MB、配送確認約177.9MB。全2リソースなら通常2,880足/日。概算でsource約2.4MB/日、補助DB約2.3MB/日（index込み、WAL/backup別）。Tableは約1KiB/足を仮定し約2.8MiB/日。退避/prune未実装のため保持量は増え続ける。日次Blob/圧縮退避の照合完了前にどの元データも削除しない。詳細値と費用はAzure検証記録。

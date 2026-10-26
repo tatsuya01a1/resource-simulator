@@ -19,12 +19,14 @@
 ## Codexへの入口
 
 1. [AGENTS.md](AGENTS.md)を読む。
-2. [ドキュメント案内](docs/README.md)から[要件定義書0.7](docs/resource-simulator-requirements.md)と[基本設計書0.7](docs/resource-simulator-basic-design.md)を読む。MVP要件と既存ACを維持し、最新値の先行公開を追記した。
+2. [ドキュメント案内](docs/README.md)から[要件定義書0.8](docs/resource-simulator-requirements.md)と[基本設計書0.8](docs/resource-simulator-basic-design.md)を読む。既存要件・ACを維持し、履歴のAzure最終検証を追記した。
 3. 基本設計書第13章の段階に沿って実装し、要件定義書第8章の受入条件で検証する。
 
 要件定義書を優先し、初期案と確定要件を区別する。数値モデル・API等の詳細は各文書を正本とし、このREADMEに複製しない。
 
 ## 現在の状態
+
+2026-10-26：履歴版を分離した[Azure検証環境](https://mango-wave-0fef6ca00.1.azurestaticapps.net)へ反映し、実通信・配送障害・3か月全量照合・旧→新→旧Workerのリハーサルを実施。[最終検証記録](docs/history-azure-validation.md)と[適用/復旧手順](docs/history-operations.md)を参照。毎分の全期間再取得を日別更新確認へ改め、配送記録のsource/内容照合と原子的通知を補強した。**本番は未切替**。最新は要件/基本設計0.8・保存設計0.5。
 
 履歴版は`codex/ohlc-history`で実装・ローカル検証、**本番未適用**。保存済み確定OHLCの非公開Table配送/再送、`/api/ohlc`、JSTローソク足と当日/週/月/暦3か月を追加し、グラフ中心のカードへ変更した。DBは版3のままで移行不要。元OHLC/outboxは削除せず、配送確認用の補助SQLiteを別に作る。[履歴検証記録](docs/history-validation.md)と[適用・復旧手順](docs/history-operations.md)を参照。APIには履歴専用read SASが必要。日次Blob・圧縮退避・配送台帳/pruneは後続で、MVP全体の完成ではない。
 

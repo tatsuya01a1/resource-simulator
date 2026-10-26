@@ -33,7 +33,11 @@ class DeliveryFaultTests(WorkspaceTest):
         with closing(sqlite3.connect(self.sidecar)) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM receipts_v2').fetchone()[0], 0)
         self.assertEqual(self.sync.once(), 2)
+        revisions = {key: value['revision'] for key, value in self.table.entities.items() if key[1].startswith('day|')}
         self.assertEqual(self.sync.once(), 0)
+        self.sidecar.unlink()
+        self.assertEqual(self.sync.once(), 2)
+        self.assertEqual({key: value['revision'] for key, value in self.table.entities.items() if key[1].startswith('day|')}, revisions)
         self.assertEqual(sum('payload' in e for e in self.table.entities.values()), 2)
 
     def test_ack_lock_rejects_and_recovers_without_deleting_source(self):

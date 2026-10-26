@@ -136,7 +136,7 @@ def deploy():
     env['SWA_CLI_TELEMETRY_OPTOUT'] = '1'
     result = subprocess.run(['node', str(ROOT / '.cache/deploy-tools/node_modules/@azure/static-web-apps-cli/dist/cli/bin.js'),
                              'deploy', 'web/dist', '--api-location', str(stage), '--api-language', 'python',
-                             '--api-version', '3.11', '--env', 'production'], cwd=ROOT, env=env,
+                             '--api-version', '3.11', '--env', 'production', '--swa-config-location', str(ROOT / 'web/dist')], cwd=ROOT, env=env,
                             capture_output=True, text=True, encoding='utf-8')
     if result.returncode:
         raise RuntimeError('isolated SWA deploy failed')

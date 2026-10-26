@@ -1,9 +1,9 @@
 # リソース管理シミュレータ 基本設計書
 
-- 文書バージョン：0.7
-- 作成日：2026-10-11／更新日：2026-10-23
+- 文書バージョン：0.8
+- 作成日：2026-10-11／更新日：2026-10-26
 - 対象：PC Worker + Azure公開／保存構成のMVP
-- 上位文書：[要件定義書 0.6](resource-simulator-requirements.md)（従来のMVP要件・ACを維持し最新値先行公開を追記）
+- 上位文書：[要件定義書 0.8](resource-simulator-requirements.md)（既存MVP要件・ACを維持し履歴最終検証を追記）
 - 位置付け：要件を実現する配置、技術構成、処理、データ、API、運用の初期設計。
 - 状態：最新値の先行公開をAzureへデプロイし実機検証済み。今回の確定構成は[構築・運用記録](azure-latest-values.md)を参照。OHLCクラウド同期・日次化・圧縮退避・履歴表示は後続。
 
@@ -499,6 +499,8 @@ Worker用の追加資料S-07〜11は2026-10-21〜22に確認した。Azure関連
 
 ## 16. 履歴ローソク足（0.7の現行設計）
 
+0.8追記：同期単位・配送確認・定期取得の現行方式は17章。16章の「100件/毎分全選択範囲取得」は旧方式であり、以下の改訂に置換する。計算モデルと原本OHLCは変更しない。
+
 ### 16.1 保存・同期・通常閲覧
 
 計算DBは版3を維持し、全確定candles/outboxを削除せず、既存復元検査をそのまま使う。配送確認は別SQLiteへ保存する（保存・移行設計10章）。独立HistorySyncスレッド・独立SDK clientが全run/resourceの未配送足を各100件まで送信する。追送中は1秒、空なら5秒待機、障害は2〜60秒の指数バックオフ。通信・読戻しは計算DBトランザクション外。最新値同期を待たせない。資格情報は既存証明書・既存CurrentStateへのContributorを使う。
@@ -532,6 +534,28 @@ Webは7日以下へ分割し同時2要求までで取得し、全cursorを取得
 ### 16.5 制約・費用と公式根拠
 
 既存azure-data-tables 12.7.0等の固定依存を維持（SDK追加なし）。[TableClient公式API](https://learn.microsoft.com/python/api/azure-data-tables/azure.data.tables.tableclient)と[Tableの上限](https://learn.microsoft.com/azure/storage/tables/scalability-targets)を2026-10-23に確認。partition当たり目標2,000 entities/sに対し通常確定2足/分、追送は順次100足・読戻しあり。3か月2リソースは約26万行（各月の日数で変動）。長期表示でも転送は射影した足を中心とするが、Table内部は原本を読むため、閲覧者数に比例して読取り費用が増える。通常1画面は最新値60 API/分と履歴最大28 API/分程度、原本走査約26万行/分。多数の利用者向けキャッシュ/日次Blobは後続。費用上限や負荷性能を保証する値ではない。月1,500円目標/説明付き3,000円許容は維持し、公開前に現行Japan Eastの要求/転送単価とSWA転送枠を再確認し、公開後実測する。Azure実通信・負荷・月額は今回未検証。
+
+## 17. 履歴版の実通信検証による改訂（0.8、2026-10-26）
+
+### 17.1 不変足と日別更新通知を原子的に配送する
+
+HistorySyncは最大1,000原本行を新しい分から選び、run/resource別に処理する。先にTable範囲を読み、一致する既存足は再作成せず検証する。不足する足はUTC日別に99足以下と日別通知1行を同一partition・同一Table transactionで作成する。足はcreateのみ、通知だけupsert。409/応答不明後は同じキーを読戻し、全フィールド一致を確認する。存在しない/異なる足にはreceiptを付けない。1000件を処理した場合の次の試行は0.25秒後、空なら5秒後、失敗は2〜60秒のバックオフ。最新値同期は独立client/threadを維持する。
+
+日別通知は同じ`ohlc|run|resource` partitionの`RowKey=day|YYYY-MM-DD`、`revision=UUID,protocol=2`。新しい足と通知の変更を原子的に確定するので、通知だけ古いまま新足が存在する状態を作らない。単なる同一足の再送ではrevisionを変更しない。旧方式/投入データの通知は読戻し後にprotocol2へ一度だけ更新する。配送確認DBへ記録するのはその後であり、障害時は安全に再照合する。原本やoutboxの削除許可には使わない。
+
+### 17.2 GET /api/ohlc?mode=manifest と日別キャッシュ
+
+必須run/resource/from/to/as_ofの検証は16章と同じ。mode=manifestだけは通常の暦3か月全体を許可し、UTC日別通知のみ最大95行を読み`run_id,resource_id,revisions:{UTC日:revision},api_time`を返す。OHLC本体は返さず、SAS/ETag/SDK継続tokenを含めない。通常モードの7日/10,080原本行・cursor・半開区間は維持する。
+
+Webは初回/期間変更/前景・オンライン復帰/60秒周期でmanifestを確認する。UTC日別、run/resource/描画解像度ごとのメモリキャッシュを使い、変更日だけ1日以下の範囲で取得する。遅れて同期された古い日もrevisionの変化で検出する。通常更新で暦3か月全体を読み直さない。移動する最古境界の日は1分原本で保持して境界を切り詰める。他の日は既存の描画用射影を使用する。取得中の失敗では途中のcacheを採用せず、既取得グラフに古い表示を示す。キャッシュは再読込で消える。manifest未対応のAPIは旧取得方式へfallbackするが、本番はAPI/Web先行更新を必須とする。
+
+### 17.3 配送確認と移行
+
+計算DBは版3を維持する。補助DBの`receipts_v2(owner,target,run,resource,minute,hash,raw_hash)`を使い、ownerはsource絶対パス（Windows casefold）のhash、targetはendpoint/tableと設定partitionのhash。候補除外にはsource JSONのraw_hash一致も必要。別DB/別パスの記録は流用せず、同じパスへの復元でも内容差があれば再照合する。旧receiptsは保全するが信用せず、旧5列方式から自動で送信済みとは推測しない。詳細は保存設計11章。SQLite quick_check/ロック/読書き失敗は同期失敗として扱い、計算を止めない。
+
+### 17.4 実測と未検証の区別
+
+実Azureの22万行超、通信断、強制終了、旧Workerへの復帰、PC/320/390pxの結果は[Azure最終検証](history-azure-validation.md)。3か月初回は約40秒かかるが、最新値は独立して更新し、定期更新は変更日だけ。初回の未確定足待ちとAPI取得時間を区別する。実スマートフォン/停電/物理I/O障害/月次請求は未検証。本番適用は別途承認後。日次Blob・圧縮退避・pruneを完了としない。
 
 段階1のローカルWorkerは実装済み。Windows上の回帰検証は[段階1検証記録](stage1-validation.md)、最新値のAzure実機検証と未検証範囲は[最新値公開の検証記録](latest-values-validation.md)を参照する。
 
