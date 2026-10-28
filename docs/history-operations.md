@@ -1,5 +1,9 @@
 # 履歴表示の適用・復旧手順
 
+版0.3（2026-10-28）：明示指示により本番切替を完了。[本番切替記録](history-production-release.md)が現行運用状態の正本。以下の「本番未実施」は各版作成当時の記録。公開/稼働コードは36385de、DB版3を維持。Workerはrelease作業ツリーから標準worker.pid/worker.stopで非表示常駐する。再起動時自動起動は未登録。HISTORY_READ_SASは2027-01-26 22:14 JST失効。更新時もcurrent SASと他設定を保持する。通常管理はREADMEのworker_control.pyを使用する。
+
+初回追送は完了。status.pending_ohlcはoutbox保持総数であり、配送待ちではない。補助DBのowner/target/raw_hashを含む未確認差分で進捗を確認する。現行配送は新しい分から最大1000行（基本設計17章/保存11章）で、後述の旧0.1の100件・古い順の記述に優先する。
+
 版0.2更新（2026-10-26）：分離したAzure検証・版3旧→新→旧Workerのリハーサルを実施済み。結果は[Azure最終検証](history-azure-validation.md)。**本番操作は未実施**。以下0.1の「未検証」は当時の記録とし、今回の現行差分を末尾に追記する。
 
 版0.1、2026-10-23〜24（更新2026-10-24）。**準備のみ。今回この手順の本番操作は実行していない。** 最新リリース記録は[Alpha/Beta本番切替](alpha-beta-validation.md)。実装起点は同じコードを含む`514e700`、公開/稼働コードSHAは`547adcb`。今回の検証は[履歴検証記録](history-validation.md)。

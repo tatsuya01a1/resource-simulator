@@ -26,6 +26,8 @@
 
 ## 現在の状態
 
+2026-10-28：**履歴版を本番公開済み**。[本番画面](https://polite-plant-0eb01a400.3.azurestaticapps.net)、公開API/Web/Worker SHA `36385dece313b50e87cba6b11a1d448ac23a84d8`。[切替記録](docs/history-production-release.md)にバックアップ・同一step照合・全5,985足照合・画面確認を記録。同じ版3DB/run/世代を維持し初回同期完了。非表示Worker常駐中、再起動時自動起動は未登録。履歴SASは2027-01-26 22:14 JST失効。日次Blob/圧縮退避/pruneは後続。以下の日付付き記録は過去の状態。
+
 2026-10-26：履歴版を分離した[Azure検証環境](https://mango-wave-0fef6ca00.1.azurestaticapps.net)へ反映し、実通信・配送障害・3か月全量照合・旧→新→旧Workerのリハーサルを実施。[最終検証記録](docs/history-azure-validation.md)と[適用/復旧手順](docs/history-operations.md)を参照。毎分の全期間再取得を日別更新確認へ改め、配送記録のsource/内容照合と原子的通知を補強した。**本番は未切替**。最新は要件/基本設計0.8・保存設計0.5。
 
 履歴版は`codex/ohlc-history`で実装・ローカル検証、**本番未適用**。保存済み確定OHLCの非公開Table配送/再送、`/api/ohlc`、JSTローソク足と当日/週/月/暦3か月を追加し、グラフ中心のカードへ変更した。DBは版3のままで移行不要。元OHLC/outboxは削除せず、配送確認用の補助SQLiteを別に作る。[履歴検証記録](docs/history-validation.md)と[適用・復旧手順](docs/history-operations.md)を参照。APIには履歴専用read SASが必要。日次Blob・圧縮退避・配送台帳/pruneは後続で、MVP全体の完成ではない。
